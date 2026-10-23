@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, TextIO, cast
 
+from .artifact_read import read_object
 from .attribution import (
     COPY_MODES,
     MATERIALIZATION_KIND,
@@ -37,6 +38,7 @@ from .compare import apply_hunger, load_menu, menu_candidates
 from .errors import CrabError, ExternalCommandError, ToolMissingError, UsageError
 from .fetch.git import GitRunner
 from .fetch.github import GH_HOSTNAME
+from .fs import is_link_stat
 from .ledger import Ledger
 from .licensing.origin import ContentOrigin
 from .maw import MawConfig, maw_slug
@@ -402,6 +404,42 @@ def _walk_titles(value: object, found: list[str]) -> None:
             _walk_titles(item, found)
 
 
+def _commenter_artifact(path: Path, *, required: bool = False) -> dict[str, Any] | None:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None if required else {}
+    except OSError:
+        return None
+    try:
+        return read_object(path)
+    except CrabError:
+        return None
+
+
+def _commenter_digest(meal_dir: Path, value: str) -> Path | None:
+    # A bundle field is untrusted data: never turn a network spelling into an SMB probe.
+    spelling = value.strip()
+    if "\x00" in value or (len(spelling) >= 2 and all(c in "\\/" for c in spelling[:2])):
+        return None
+    digest = Path(value)
+    if digest.is_absolute():
+        return digest  # ordinary cached meals retain their absolute digest reference
+    if digest.anchor or any(
+        part == ".." or ":" in part or part.rstrip(" .") != part for part in digest.parts
+    ):
+        return None
+    current = meal_dir.resolve()
+    for part in digest.parts:
+        current /= part
+        try:
+            if is_link_stat(current.lstat()):
+                return None
+        except OSError:
+            return None
+    return current
+
+
 def commenter_titles(meal_dir: Path) -> list[str] | None:
     """Commenter prose the prey digest carries, which served notes may not quote.
 
@@ -410,25 +448,26 @@ def commenter_titles(meal_dir: Path) -> list[str] | None:
     cannot be read — no digest named, the digest gone from the cache, the file unreadable — and
     then no note can be checked against them.
     """
-    digest = _read_json_object(meal_dir / "meal.json").get("prey_digest")
+    meal = _commenter_artifact(meal_dir / "meal.json", required=True)
+    digest = meal.get("prey_digest") if meal else None
     if not isinstance(digest, str) or not digest:
         return None
-    try:
-        loaded = json.loads((Path(digest) / "issues.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    directory = _commenter_digest(meal_dir, digest)
+    if directory is None:
+        return None
+    loaded = _commenter_artifact(directory / "issues.json", required=True)
+    if loaded is None:
         return None
     found: list[str] = []
     _walk_titles(loaded, found)
-    signals_file = Path(digest) / "signals.json"
-    manifest = _read_json_object(Path(digest) / "manifest.json")
-    declared = any(as_dict(m).get("name") == "signals" for m in as_list(manifest.get("miners")))
-    if declared and not signals_file.is_file():
+    manifest = _commenter_artifact(directory / "manifest.json")
+    if manifest is None:
         return None
-    if signals_file.exists():
-        try:
-            signals = json.loads(signals_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
+    declared = any(as_dict(m).get("name") == "signals" for m in as_list(manifest.get("miners")))
+    signals = _commenter_artifact(directory / "signals.json", required=declared)
+    if signals is None:
+        return None
+    if signals:
         _walk_titles(signals, found)
         for channel in as_dict(as_dict(signals).get("channels")).values():
             for item in as_list(as_dict(channel).get("items")):

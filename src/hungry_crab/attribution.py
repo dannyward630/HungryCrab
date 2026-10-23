@@ -25,6 +25,7 @@ from .errors import CrabError
 from .fetch.git import GitRunner
 from .licensing.detect import find_spdx_identifier, is_license_file_name
 from .licensing.matrix import LicenseClass, classify, normalize
+from .licensing.policy import nutrient_material
 from .mdutil import cell
 from .miners.inventory import VENDORED_DIRS
 from .nutrients import Candidate
@@ -891,6 +892,13 @@ def _check_against_meal(
             hint=f"expected {card.id}, got {receipt.nutrient_id}",
         )
     for item in receipt.taken:
+        if menu.get("mode") == "strict" and nutrient_material(
+            card.category, [item.prey_path, item.maw_path]
+        ) not in {"configuration", "template"}:
+            raise CrabError(
+                "strict maw policy refuses materialization of code",
+                hint=f"{item.prey_path} -> {item.maw_path} requires clean-room REIMPLEMENT",
+            )
         if item.maw_path in (ATTRIBUTIONS_PATH, attribution_file):
             raise CrabError(
                 "a materialization receipt may not take over the attribution files",

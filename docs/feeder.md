@@ -142,13 +142,15 @@ CONSUME phase can read `menu.json` directly without a model or repository mutati
 
 ## Strict mode
 
-`.crab.yml` `mode: strict` is enforced by the license layer during comparison. `COPY` code
-becomes clean-room `REIMPLEMENT`; configs and templates retain `COPY`. Source code evidence
-(including source tests) takes precedence over a configuration category. Architecture,
-history, code and unknown categories require reimplementation. Existing `HUMAN`,
-`IDEAS_ONLY`, `REIMPLEMENT` and `COPY_FILE` verdicts are never widened. Material, maw mode
-and downgrade reason travel in the menu and served issue's license trace. Models must not
-invent or reverse these verdicts.
+`.crab.yml` `mode: strict` is enforced by the license layer during comparison. `COPY` and
+`COPY_FILE` code become clean-room `REIMPLEMENT`; recognized configs and templates retain
+their legal copy mode. Source code evidence (including source tests) takes precedence over a
+configuration category. Shell scripts, unknown file types, missing path evidence, architecture,
+history, code and unknown categories require reimplementation. Known configuration names and
+formats are explicit exceptions. Existing `HUMAN`, `IDEAS_ONLY` and `REIMPLEMENT` verdicts are
+never widened. Material, maw mode and downgrade reason travel in the menu and served issue's
+license trace. Materialization rechecks each source and destination path against strict policy
+before reading or copying content. Models must not invent or reverse these verdicts.
 
 `Feeder smoke` exercises the composite on Linux/Windows and the reusable workflow against
 a live public prey, checks both digests and verifies a clean maw. It runs separately from

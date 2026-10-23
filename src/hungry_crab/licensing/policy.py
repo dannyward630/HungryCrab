@@ -6,26 +6,60 @@ from pathlib import PurePosixPath
 
 from .matrix import Mode
 
-CODE_EXTENSIONS = {
-    ".py",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".rs",
-    ".go",
-    ".cs",
-    ".java",
-    ".c",
-    ".cc",
-    ".cpp",
-    ".h",
-    ".hpp",
-    ".rb",
-    ".php",
-    ".swift",
-    ".kt",
+_CONFIG_SUFFIXES = {".json", ".jsonc", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf"}
+_CONFIG_NAMES = {
+    ".editorconfig",
+    ".gitignore",
+    ".gitattributes",
+    ".dockerignore",
+    ".npmrc",
+    ".yarnrc",
+    ".prettierignore",
+    ".prettierrc",
+    ".eslintrc",
+    "dockerfile",
+    "makefile",
+    "justfile",
+    "cargo.lock",
+    "poetry.lock",
+    "uv.lock",
+    "yarn.lock",
+    "requirements.txt",
+    "requirements-dev.txt",
 }
+_SCRIPT_CONFIG_STEMS = {
+    "vitest.config",
+    "vite.config",
+    "jest.config",
+    "eslint.config",
+    "webpack.config",
+    "rollup.config",
+    "prettier.config",
+    "tailwind.config",
+    "postcss.config",
+    "babel.config",
+    "next.config",
+    "nuxt.config",
+    "svelte.config",
+    "astro.config",
+}
+_TEMPLATE_SUFFIXES = {".md", ".markdown", ".rst", ".adoc", ".j2", ".jinja", ".jinja2", ".tmpl"}
+
+
+def path_material(path: str) -> str:
+    """Recognized configuration/template forms only; unknown names and scripts are code."""
+    name = PurePosixPath(path).name.casefold()
+    suffix = PurePosixPath(name).suffix
+    if name in _CONFIG_NAMES or suffix in _CONFIG_SUFFIXES:
+        return "configuration"
+    if (
+        suffix in {".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"}
+        and name.removesuffix(suffix) in _SCRIPT_CONFIG_STEMS
+    ):
+        return "configuration"
+    if suffix in _TEMPLATE_SUFFIXES or name in {"readme", "contributing", "code_of_conduct"}:
+        return "template"
+    return "code"
 
 
 def nutrient_material(category: str, paths: list[str]) -> str:
@@ -34,33 +68,31 @@ def nutrient_material(category: str, paths: list[str]) -> str:
         return "code"
     if category == "issue-lesson":
         return "idea"
-    if (
-        category in {"ci", "tooling", "tests", "docs", "ai-config"}
-        and paths
-        and all(
-            ".config." in PurePosixPath(path).name
-            or PurePosixPath(path).suffix.lower() not in CODE_EXTENSIONS
-            for path in paths
-        )
-    ):
-        return "template" if category == "docs" else "configuration"
-    if any(PurePosixPath(path).suffix.lower() in CODE_EXTENSIONS for path in paths):
+    if not paths or category not in {
+        "ci",
+        "tooling",
+        "tests",
+        "docs",
+        "ai-config",
+        "hygiene",
+        "security",
+        "deps",
+    }:
         return "code"
-    if category in {"ci", "tooling", "ai-config", "hygiene", "security", "deps", "tests"}:
-        return "configuration"
-    if category == "docs":
-        return "template"
-    return "code"
+    materials = {path_material(path) for path in paths}
+    if "code" in materials:
+        return "code"
+    return "template" if "template" in materials else "configuration"
 
 
 def apply_maw_policy(mode: str, *, policy: str, material: str) -> tuple[str, str]:
     if (
         policy == "strict"
-        and mode == Mode.COPY.value
+        and mode in {Mode.COPY.value, Mode.COPY_FILE.value}
         and material not in {"configuration", "template"}
     ):
         return (
             Mode.REIMPLEMENT.value,
-            "strict maw policy: COPY code requires clean-room REIMPLEMENT",
+            f"strict maw policy: {mode} code requires clean-room REIMPLEMENT",
         )
     return mode, ""

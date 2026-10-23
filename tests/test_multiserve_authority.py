@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,10 @@ from hungry_crab.errors import CrabError
 from hungry_crab.feeder import EatOptions, EatResult
 from hungry_crab.ledger import Ledger
 from hungry_crab.maw import MawConfig
-from hungry_crab.multifeed import eat_many
+from hungry_crab.multifeed import eat_many, load_multi
 from hungry_crab.multiserve import serve_many
-from hungry_crab.serve import ServeOptions
+from hungry_crab.nutrients import Candidate
+from hungry_crab.serve import ServeOptions, commenter_titles
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -71,3 +73,148 @@ def test_routing_ids_do_not_authorize_automatic_publication(
             assert any("receipt" in row["reason"] for row in report.skipped)
     if not (explicit and mode == "issue"):
         assert not client.created and not client.labels and not ledger.entries
+
+
+@pytest.mark.parametrize("working_directory", ["unrelated", "sibling"])
+@pytest.mark.parametrize("quoting", [False, True])
+def test_source_bundle_commenter_guard_uses_its_own_digest_from_every_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, working_directory: str, quoting: bool
+) -> None:
+    maw = tmp_path / "maw"
+    maw.mkdir()
+    git(maw, "init", "-b", "main")
+    git(maw, "remote", "add", "origin", "https://github.com/example/maw.git")
+    roots = [tmp_path / "a", tmp_path / "b"]
+    for root in roots:
+        root.mkdir()
+    quote = "Please preserve all original directory ownership and file permissions while cloning"
+    ids: dict[str, str] = {}
+
+    def feed(prey: Target, maw: Path, options: EatOptions, **kwargs: object) -> EatResult:
+        result = fake_eat(prey, maw, options, **kwargs)
+        name = prey.path.name
+        card = Candidate(
+            "issue-lesson",
+            f"issue-lesson.{name}.theme",
+            "Repository demand",
+            "A recurring request",
+            origin="commenters",
+            serve_as="idea",
+            license_mode="IDEAS_ONLY",
+            score=0.7,
+            trace={"prey": prey.label, "sha": "a"},
+        )
+        ids[name] = card.id
+        menu_path = result.out_dir / "menu.json"
+        menu = json.loads(menu_path.read_text(encoding="utf-8"))
+        menu["candidates"] = [card.to_dict()]
+        menu_path.write_text(json.dumps(menu), encoding="utf-8")
+        (result.out_dir / "meal.json").write_text(
+            json.dumps({"prey_digest": "prey-digest"}), encoding="utf-8"
+        )
+        digest = result.out_dir / "prey-digest"
+        digest.mkdir()
+        title = (
+            quote if name == "a" else "Please add a separate feature for observing release notes"
+        )
+        (digest / "issues.json").write_text(
+            json.dumps({"issues": [{"title": title}]}), encoding="utf-8"
+        )
+        return result
+
+    monkeypatch.setattr("hungry_crab.multifeed.eat", feed)
+    bundle = eat_many(
+        [Target(path=root) for root in roots], maw, EatOptions(out=tmp_path / "bundle")
+    )
+    aggregate, paths, _ = load_multi(bundle.out_dir)
+    sibling_key = next(
+        row["trace"]["primary_source"] for row in aggregate["candidates"] if row["id"] == ids["b"]
+    )
+    unrelated = tmp_path / "elsewhere"
+    unrelated.mkdir()
+    notes = tmp_path / "notes.json"
+    notes.write_text(
+        json.dumps(
+            {
+                ids["a"]: {
+                    "why": quote if quoting else "Several requests suggest preserving metadata.",
+                    "how": "Add isolated regression fixtures.",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(paths[sibling_key] if working_directory == "sibling" else unrelated)
+    report = serve_many(
+        bundle.out_dir,
+        maw,
+        ServeOptions(ids=[ids["a"]], notes=notes),
+        config=MawConfig.load(maw),
+        ledger=Ledger.load(None, maw="maw"),
+        client=FakeIssues(),
+    )
+    if quoting:
+        assert not report.previews
+        assert any("notes quote commenter text" in row["reason"] for row in report.skipped)
+    else:
+        assert [preview["id"] for preview in report.previews] == [ids["a"]]
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "../outside",
+        "x/../../outside/../meal/prey-digest",
+        "D:outside",
+        pytest.param(
+            "\\outside",
+            marks=pytest.mark.skipif(sys.platform != "win32", reason="Windows rooted path"),
+        ),
+        "//attacker.example/share",
+        "\\\\attacker.example\\share",
+    ],
+)
+def test_relative_bundle_escape_and_network_digest_fields_are_refused_before_artifact_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
+) -> None:
+    from hungry_crab import serve as serving
+
+    meal = tmp_path / "meal"
+    meal.mkdir()
+    metadata = meal / "meal.json"
+    metadata.write_text(json.dumps({"prey_digest": reference}), encoding="utf-8")
+    real_read = serving._commenter_artifact
+
+    def guarded(path: Path, *, required: bool = False) -> object:
+        assert path == metadata, "an unsafe digest reference reached artifact reads"
+        return real_read(path, required=required)
+
+    monkeypatch.setattr(serving, "_commenter_artifact", guarded)
+    assert commenter_titles(meal) is None
+
+
+def test_bundle_digest_cannot_redirect_through_a_symlink_or_windows_junction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from hungry_crab import serve as serving
+
+    meal, outside = tmp_path / "meal", tmp_path / "outside"
+    meal.mkdir()
+    outside.mkdir()
+    alias = meal / "prey-digest"
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(outside), str(alias))
+    else:
+        alias.symlink_to(outside, target_is_directory=True)
+    metadata = meal / "meal.json"
+    metadata.write_text(json.dumps({"prey_digest": "prey-digest"}), encoding="utf-8")
+    real_read = serving._commenter_artifact
+
+    def guarded(path: Path, *, required: bool = False) -> object:
+        assert path == metadata, "a linked digest reached artifact reads"
+        return real_read(path, required=required)
+
+    monkeypatch.setattr(serving, "_commenter_artifact", guarded)
+    assert commenter_titles(meal) is None

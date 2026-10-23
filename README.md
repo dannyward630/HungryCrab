@@ -219,7 +219,7 @@ with a suggested spelling where available; `scoring` retains its own flexible ne
 `trust.bypass_license` accept YAML booleans only: write `false`, not the string `"false"`.
 
 - `license`: SPDX id for the maw, or auto-detect from `LICENSE` when omitted.
-- `mode`: `normal` or `strict`; strict downgrades COPY code to clean-room REIMPLEMENT while configurations and templates stay copyable.
+- `mode`: `normal` or `strict`; strict downgrades COPY and COPY_FILE code to clean-room REIMPLEMENT while recognized configurations and templates stay copyable.
 - `profile`: reviewed hunger defaults for balanced, library, CLI, service or frontend projects.
 - `memory`: bounded learning from confirmed owner decisions, with an explicit off switch.
 - `hunt`: bounded GitHub discovery queries, size/stars/license filters and revisiting policy.

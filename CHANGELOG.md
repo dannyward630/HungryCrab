@@ -20,6 +20,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Catch:** `--since` values beyond the representable date range (e.g. 4301-digit durations)
   are now rejected with a usage error instead of being passed through
   ([#321](https://github.com/drevendev/HungryCrab/issues/321)).
+- **Security:** strict mode downgrades both COPY and COPY_FILE code to clean-room REIMPLEMENT,
+  treats scripts and unknown material conservatively, and rechecks materialization receipt paths
+  ([#299](https://github.com/drevendev/HungryCrab/issues/299)). Multi-prey publication resolves
+  commenter-origin evidence from its own source bundle and refuses relative traversal and links
+  ([#338](https://github.com/drevendev/HungryCrab/issues/338)).
 - Preserve comma-separated generic type arguments such as `HashMap<K, V>` in wiki headings while
   continuing to strip inline HTML ([#390](https://github.com/drevendev/HungryCrab/issues/390)).
 - **Loop security:** MOLT/HARDEN protect nested licence/notice files and attribution records;
