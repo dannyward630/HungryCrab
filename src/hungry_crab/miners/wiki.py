@@ -88,14 +88,88 @@ def _code_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _generic_type_spans(text: str) -> list[tuple[int, int]]:
+    """Find comma-separated, capitalized type arguments in one forward scan.
+
+    These are text rather than HTML (for example, the `<K, V>` in `HashMap<K, V>`).
+    Restricting the candidate alphabet and requiring a comma avoids protecting tag
+    attributes; advancing past each scanned candidate keeps malformed input linear.
+    """
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    while cursor < len(text):
+        start = text.find("<", cursor)
+        if start < 0:
+            break
+        if start + 1 >= len(text) or not text[start + 1].isupper():
+            cursor = start + 1
+            continue
+
+        position = start + 1
+        depth = 1
+        has_comma = False
+        while position < len(text):
+            char = text[position]
+            if char == "<":
+                depth += 1
+            elif char == ">":
+                depth -= 1
+                if depth == 0:
+                    if has_comma:
+                        spans.append((start, position + 1))
+                    cursor = position + 1
+                    break
+            elif char == ",":
+                has_comma = True
+            elif not (char.isalnum() or char in "_.," or char.isspace()):
+                cursor = position + 1
+                break
+            position += 1
+        else:
+            break
+        if depth > 0 and position >= len(text):
+            break
+    return spans
+
+
+def _plain_generic(generic: str) -> str:
+    """Keep type brackets as text while removing any nested HTML tags."""
+    inner = generic[1:-1]
+    parts: list[str] = []
+    position = 0
+    removed_tag = False
+    nested_types = re.compile(
+        r"(?<=[A-Za-z0-9_])<[A-Z][A-Za-z0-9_]*(?:\s*,\s*[A-Z][A-Za-z0-9_]*)*>"
+    )
+    for match in nested_types.finditer(inner):
+        cleaned, count = _HEADING_TAG_RE.subn("", inner[position : match.start()])
+        parts.append(cleaned)
+        removed_tag |= count > 0
+        parts.append(_OPENING_ANGLE_RE.sub("&lt;", match.group()))
+        position = match.end()
+    cleaned, count = _HEADING_TAG_RE.subn("", inner[position:])
+    parts.append(cleaned)
+    removed_tag |= count > 0
+    return "&lt;" + "".join(parts) + ("" if removed_tag else ">")
+
+
 def _plain_text(segment: str) -> str:
-    text = _HEADING_IMAGE_RE.sub("", segment)
+    parts: list[str] = []
+    position = 0
+    for start, end in _generic_type_spans(segment):
+        parts.append(segment[position:start])
+        parts.append(_plain_generic(segment[start:end]))
+        position = end
+    parts.append(segment[position:])
+    # Strip links/images as whole constructs, including ones with a generic in the label.
+    text = "".join(parts)
+    text = _HEADING_IMAGE_RE.sub("", text)
     text = _HEADING_LINK_RE.sub(r"\1", text)
     text = _HEADING_TAG_RE.sub("", text)
-    # What one pass cannot take apart (nested brackets, a tag split by another `<`) is
-    # defused instead: a `<` that could still open a tag or an autolink is written as text
-    # (`&lt;`; one before a space opens nothing), and no `](` joins a link text to a target.
-    return _OPENING_ANGLE_RE.sub("&lt;", text).replace("](", "] (")
+    # Unhandled tag-like fragments are defused; a '<' before whitespace is ordinary text.
+    text = _OPENING_ANGLE_RE.sub("&lt;", text).replace("](", "] (")
+    # Keep boundary spaces around code spans and preserve untouched heading whitespace.
+    return re.sub(r"\s+", " ", text) if _HEADING_TAG_RE.search(segment) else text
 
 
 def plain_heading(title: str) -> str:
