@@ -78,3 +78,60 @@ def test_compare_refuses_inconsistent_successful_producer_artifact_by_default(
         options=CompareOptions(allow_partial=True),
     )
     assert allowed.menu["prey"]["label"]
+
+
+@pytest.mark.parametrize("damage", ["oversized", "wrong-size", "missing-size"])
+def test_integrity_refuses_unbounded_json_before_opening_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    from hungry_crab import digest_integrity
+
+    raw = b'{"value":"' + b"x" * 50 + b'"}'
+    (tmp_path / "deps.json").write_bytes(raw)
+    entry = {"name": "deps.json", "miner": "deps", "bytes": len(raw)}
+    if damage == "wrong-size":
+        entry["bytes"] = 1
+    elif damage == "missing-size":
+        entry.pop("bytes")
+    manifest = {"files": [entry], "miners": [{"name": "deps", "ok": True, "files": ["deps.json"]}]}
+    monkeypatch.setattr(digest_integrity, "MAX_JSON_BYTES", 32)
+    monkeypatch.setattr(
+        digest_integrity, "read_object", lambda _: pytest.fail("untrusted JSON was opened")
+    )
+    errors = digest_integrity_errors(tmp_path, manifest)
+    assert errors and "deps.json" in errors[0]
+
+
+def test_deep_producer_json_is_an_integrity_error_not_a_traceback(tmp_path: Path) -> None:
+    raw = b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}"
+    (tmp_path / "deps.json").write_bytes(raw)
+    manifest = {
+        "files": [{"name": "deps.json", "miner": "deps", "bytes": len(raw)}],
+        "miners": [{"name": "deps", "ok": True, "files": ["deps.json"]}],
+    }
+    assert digest_integrity_errors(tmp_path, manifest) == ["deps: invalid producer JSON: deps.json"]
+
+
+@pytest.mark.parametrize("extra", [False, True])
+def test_artifact_json_depth_has_a_platform_independent_boundary(
+    tmp_path: Path, extra: bool
+) -> None:
+    from hungry_crab.artifact_read import MAX_JSON_DEPTH, read_object
+
+    depth = MAX_JSON_DEPTH - 1 + int(extra)
+    path = tmp_path / "deps.json"
+    path.write_bytes(b'{"value":' + b"[" * depth + b"0" + b"]" * depth + b"}")
+    if extra:
+        with pytest.raises(CrabError, match="invalid JSON"):
+            read_object(path)
+    else:
+        assert "value" in read_object(path)
+
+
+def test_json_string_brackets_and_escaped_quotes_do_not_count_as_nesting(tmp_path: Path) -> None:
+    from hungry_crab.artifact_read import read_object
+
+    data = {"text": '"[]{}\\' * 2000}
+    path = tmp_path / "deps.json"
+    path.write_text(json.dumps(data), encoding="utf-8-sig")
+    assert read_object(path) == data
