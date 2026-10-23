@@ -14,12 +14,15 @@ rot too.
 
 from __future__ import annotations
 
+import argparse
+import re
 from dataclasses import fields
 from pathlib import Path
 
 import pytest
 import yaml
 
+from hungry_crab.cli import build_parser
 from hungry_crab.licensing import Mode, decide
 from hungry_crab.maw import DEFAULT_CONFIG_TEXT, MawConfig
 
@@ -151,3 +154,35 @@ def test_readme_shows_the_template_crab_init_writes() -> None:
     section = readme.split("## Configuration", 1)[1].split("\n## ", 1)[0]
     block = section.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert block == DEFAULT_CONFIG_TEXT
+
+
+def test_docs_match_subparser_choices() -> None:
+    """Compare the intended command lists, not incidental mentions elsewhere in a file."""
+    agents_text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    layout = agents_text.split("## Layout\n", 1)[1].split("\n## ", 1)[0]
+    cli_entry = layout.split("- `src/hungry_crab/cli.py`:", 1)[1].split("\n- ", 1)[0]
+    command_list = re.search(r"`crab ([^`]+)`", cli_entry)
+    assert command_list is not None, "the CLI layout entry must list crab's subcommands"
+    agents_commands = {name.strip() for name in command_list[1].split("|")}
+
+    glossary_text = (ROOT / "docs/design/GLOSSARY.md").read_text(encoding="utf-8")
+    commands = glossary_text.split("## Commands\n", 1)[1].split("\n## ", 1)[0]
+    glossary_commands = {entry.split()[0] for entry in re.findall(r"(?:^|·)\s*`([^`]+)`", commands)}
+    engine_commands = {
+        name
+        for action in build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for name in action.choices
+    }
+    assert agents_commands == engine_commands
+    assert glossary_commands == engine_commands
+
+
+def test_every_skill_directory_appears_in_agents() -> None:
+    """Keep the actual skill list equal to the shipped skill directories."""
+    agents_text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    layout = agents_text.split("## Layout\n", 1)[1].split("\n## ", 1)[0]
+    skill_list = layout.split("the Agent Skills (", 1)[1].split("), the subagents", 1)[0]
+    documented = set(re.findall(r"`([^`]+)`", skill_list))
+    shipped = {path.parent.name for path in (ROOT / "skills").glob("*/SKILL.md")}
+    assert documented == shipped

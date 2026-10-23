@@ -16,7 +16,8 @@ authority when a document disagrees with it. The decisions log is at the end of
 ## Layout
 
 - `src/hungry_crab/cli.py`: argparse entry point (`crab sniff | catch | digest | compare | menu |
-  serve | spec | attribution | ledger | tune | loop | init | update | cache`).
+  serve | spec | attribution | ledger | tune | loop | init | update | cache | eat | hunt | mcp |
+  profiles | report | version`).
 - `src/hungry_crab/loop.py`, `loop_config.py`, `loop_provider.py`, `loop_work.py`, `loop_cli.py`:
   the scheduled phase protocol, strict maw-owned policy, provider waits and guarded effects.
   Only recording advances phases; each attempt has a bounded lease. GROW retains the licensed
@@ -53,7 +54,7 @@ authority when a document disagrees with it. The decisions log is at the end of
   prey at that commit, `.crab/attributions.json` and the notice file `crab attribution` renders.
 - `src/hungry_crab/mdutil.py`, `tokens.py`, `safety.py`: Markdown builder with a token budget,
   token estimate, prompt-injection heuristics.
-- `skills/`, `agents/`, `commands/`, `hooks/`, `.claude-plugin/`: the Agent Skills (`eat`,
+- `skills/`, `agents/`, `commands/`, `hooks/`, `.claude-plugin/`: the Agent Skills (`loop`, `eat`,
   `license`, `serve`, `cleanroom`), the subagents (`crab-historian`, `crab-architect`,
   `crab-cleanroom-impl`), the `/crab:sniff` and `/crab:menu` commands, the two `PreToolUse`
   hooks, and the plugin plus marketplace manifests — Claude Code's under `.claude-plugin/`,

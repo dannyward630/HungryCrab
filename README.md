@@ -396,8 +396,10 @@ commenters. This is a compliance aid, not legal advice.
 - **Two `PreToolUse` hooks make the first rule mechanical in Claude Code.** `crab-prey-guard`
   refuses a Bash or PowerShell command that touches the prey cache unless it is one of a few
   audited read-only shapes (in PowerShell, a read cmdlet such as `Get-Content` or
-  `Get-ChildItem` with literal arguments), and `crab-cleanroom-guard` keeps the clean-room
-  implementer out of the cache altogether. They run from the plugin's own source tree
+  `Get-ChildItem` with literal arguments). It also checks Monitor and desktop terminal commands,
+  and refuses Write, Edit, MultiEdit and NotebookEdit calls into the cache. The clean-room guard
+  keeps the implementer out of the cache through Read, Grep, Glob, Write, Edit and PowerShell;
+  the prey guard covers its Bash commands. They run from the plugin's own source tree
   through `hooks/guard.py`, with the first Python 3.11+ the shell finds, so nothing has to be
   installed or signed for them; when not even an interpreter is there, the hook says so and the
   call proceeds, because a guard that blocked every call over its own setup would be switched
