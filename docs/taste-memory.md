@@ -107,6 +107,10 @@ crab serve --meal-dir ../meal --maw . --top 3 --as dry-run
 
 Two to ten distinct prey are exported atomically. If a source fails, the aggregate is not published.
 Each `sources/<id>/` is a complete ordinary Feeder bundle with its pinned digests, menu and meal.
+Relative digest references are resolved from that source bundle, independent of the process's
+working directory. Traversal, network paths and relative symlink or junction aliases are refused
+before reading commenter-origin evidence; malformed or missing required evidence blocks copying
+commenter prose into a publication.
 The aggregate `menu.json` uses `hungry-crab.menu/1` with `kind: multi-prey`; `feeder.json` uses
 `hungry-crab.feeder-multi/1` and records every source file hash. Markdown is paged without dropping
 cards. Reading and serving rebuild the aggregate from its verified source menus.

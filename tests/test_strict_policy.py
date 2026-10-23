@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from helpers import copy_repo
 
 from hungry_crab.compare import CompareOptions, compare_digests, menu_candidates
 from hungry_crab.digest import DigestResult
@@ -14,7 +16,7 @@ from hungry_crab.nutrients import Candidate, Evidence
 from hungry_crab.serve import ServeOptions, render_issue, serve
 
 
-@pytest.mark.parametrize("mode", ["HUMAN", "IDEAS_ONLY", "REIMPLEMENT", "COPY_FILE"])
+@pytest.mark.parametrize("mode", ["HUMAN", "IDEAS_ONLY", "REIMPLEMENT"])
 def test_strict_never_widens_a_mode(mode: str) -> None:
     assert apply_maw_policy(mode, policy="strict", material="code") == (mode, "")
 
@@ -26,6 +28,59 @@ def test_strict_policy_retains_configs_and_templates() -> None:
     assert nutrient_material("tests", ["tests/test_core.py"]) == "code"
     assert nutrient_material("tests", ["vitest.config.ts"]) == "configuration"
     assert nutrient_material("future-category", []) == "code"
+
+
+@pytest.mark.parametrize("mode", ["COPY", "COPY_FILE"])
+def test_strict_requires_cleanroom_for_every_code_copy_mode(mode: str) -> None:
+    result, reason = apply_maw_policy(mode, policy="strict", material="code")
+    assert result == "REIMPLEMENT" and mode in reason
+    assert apply_maw_policy(mode, policy="strict", material="configuration") == (mode, "")
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        [],
+        ["tests/run.sh"],
+        ["tools/validate.lua"],
+        ["test.mjs"],
+        ["test.ps1"],
+        ["evil.config.py"],
+        ["unknown.config.js"],
+        ["test.unknown"],
+        ["ci.yml", "run.sh"],
+    ],
+)
+def test_unknown_scripts_and_missing_evidence_are_code(paths: list[str]) -> None:
+    assert nutrient_material("tests", paths) == "code"
+
+
+@pytest.mark.parametrize("license_id", ["MIT", "MPL-2.0"])
+def test_real_menu_keeps_only_recognized_config_copy_permissions(
+    npm_digest: DigestResult, py_digest: DigestResult, tmp_path: Path, license_id: str
+) -> None:
+    prey = copy_repo(npm_digest.out_dir, tmp_path / "prey")
+    path = prey / "license.json"
+    license_data = json.loads(path.read_text(encoding="utf-8"))
+    license_data["spdx"] = license_id
+    path.write_text(json.dumps(license_data), encoding="utf-8")
+    manifest_path = prey / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in manifest["files"]:
+        if entry["name"] == "license.json":
+            entry["bytes"] = path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    normal = compare_digests(prey, py_digest.out_dir, options=CompareOptions(maw_license="MIT"))
+    strict = compare_digests(
+        prey, py_digest.out_dir, options=CompareOptions(maw_license="MIT", mode="strict")
+    )
+    legal = "COPY" if license_id == "MIT" else "COPY_FILE"
+    assert normal.verdict["mode"] == legal
+    architecture = next(card for card in strict.candidates if card.category == "architecture")
+    assert architecture.license_mode == "REIMPLEMENT"
+    assert architecture.material == "code" and legal in architecture.trace["maw_policy_reason"]
+    config = next(card for card in strict.candidates if card.id == "crab:ci:ci.cache")
+    assert config.license_mode == legal and config.material == "configuration"
 
 
 def test_same_prey_strict_and_normal_modes_reach_menu_and_issue(

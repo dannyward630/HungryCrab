@@ -185,6 +185,58 @@ def _prepare(maw: Path, payload: str | None = None, **kwargs: Any) -> PreparedPu
 # --- the receipt -------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("mode", ["COPY", "COPY_FILE"])
+@pytest.mark.parametrize(
+    "path", ["src/core.py", "tools/run.sh", "scripts/run.ps1", "tools/helper.lua"]
+)
+def test_strict_receipt_rechecks_taken_paths_before_reading_or_materializing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, path: str
+) -> None:
+    monkeypatch.setattr(
+        "hungry_crab.attribution.read_maw_text",
+        lambda *_: pytest.fail("strict receipt read a maw file"),
+    )
+    payload = _payload(taken=[{"prey_path": path, "maw_path": path, "verbatim": True}])
+    with pytest.raises(CrabError, match="strict maw policy"):
+        prepare_copy_pull_request(
+            _card(mode),
+            {**MENU, "mode": "strict"},
+            payload,
+            tmp_path,
+            title="feat: carry a configuration",
+            body="Reviewed configuration",
+            attribution_file="THIRD_PARTY_NOTICES.md",
+            source_reader=_prey(),
+        )
+
+
+@pytest.mark.parametrize("mode", ["COPY", "COPY_FILE"])
+def test_strict_receipt_allows_verified_configuration_and_generated_notice(
+    tmp_path: Path, mode: str
+) -> None:
+    _maw(tmp_path, {"ci/test.yml": "name: test\n"})
+    payload = _payload(
+        taken=[
+            {"prey_path": ".github/workflows/test.yml", "maw_path": "ci/test.yml", "verbatim": True}
+        ]
+    )
+    prepared = prepare_copy_pull_request(
+        _card(mode),
+        {**MENU, "mode": "strict"},
+        payload,
+        tmp_path,
+        title="feat: carry a configuration",
+        body="Reviewed configuration",
+        attribution_file="THIRD_PARTY_NOTICES.md",
+        source_reader=_prey(),
+    )
+    assert {file.path for file in prepared.files} == {
+        "ci/test.yml",
+        ATTRIBUTIONS_PATH,
+        "THIRD_PARTY_NOTICES.md",
+    }
+
+
 def test_receipt_kind_tells_the_two_receipts_apart() -> None:
     assert receipt_kind(_payload()) == "materialization"
     assert receipt_kind('{"version": 1, "nutrient_id": "crab:ci:x"}') == "cleanroom"
