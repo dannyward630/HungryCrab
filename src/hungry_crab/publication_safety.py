@@ -562,11 +562,26 @@ def _entropy_hit(line: str) -> bool:
     return any(_opaque_secret(_token_value(m.group(1))) for m in _TOKEN.finditer(entropy_line))
 
 
+def _display_views(text: str) -> tuple[str, ...]:
+    """Raw bytes and known display transformations must retain the same secret blockers."""
+    views: list[str] = []
+    current = text
+    # Metadata accepts at most four entity layers, then adds one escaping layer. Keep every
+    # intermediate view: a literal entity may itself be part of a credential's bytes.
+    for _ in range(6):
+        views.extend((current, current.replace(" (at) ", "@"), current.replace("(at)", "@")))
+        decoded = html.unescape(current)
+        if decoded == current:
+            break
+        current = decoded
+    return tuple(dict.fromkeys(views))
+
+
 def _path_rules(logical_path: str) -> list[str]:
     """Rules a logical path matches: a generated file name is published like its content."""
 
     rules: list[str] = []
-    for variant in dict.fromkeys((logical_path, html.unescape(logical_path))):
+    for variant in _display_views(logical_path):
         segments = re.sub(r"[\\/]", " ", variant)
         found = _shape_rules(variant) + _shape_rules(segments)
         if not found and _entropy_hit(segments):
@@ -608,7 +623,7 @@ def scan_publication(
         # credential that a reader sees after one HTML decoding pass (for example `&#95;`
         # in a token prefix, or `&#64;` in URL credentials). Preserve physical line numbers.
         rules = []
-        for variant in dict.fromkeys((line, html.unescape(line))):
+        for variant in _display_views(line):
             rules.extend(
                 _line_rules(variant, bare_values=bare_values, config=config, lock_file=lock_file)
             )

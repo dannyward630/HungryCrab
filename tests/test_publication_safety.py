@@ -94,8 +94,22 @@ def test_quoting_a_receipt_does_not_disable_its_secret_scan() -> None:
     from hungry_crab.receipt_text import quote_receipt_text
 
     quoted = quote_receipt_text("credential: " + GITHUB)
-    assert GITHUB not in quoted
+    assert GITHUB in quoted, "literal data must still pass the secret scan"
     assert scan_publication("pull-request-body.md", quoted)
+
+
+@pytest.mark.parametrize("password", [PASSWORD, "password(at)" + LITERAL, "pass&Tab;word"])
+def test_visible_at_substitution_cannot_hide_url_credentials(password: str) -> None:
+    from hungry_crab.safety import safe_name
+
+    shown = safe_name("postgres://crab:" + password + "@db.example/crab")
+    assert "@" not in shown
+    assert any(f.rule == "url-credentials" for f in scan_publication("PR_BODY", shown))
+    with pytest.raises(CrabError):
+        publish_prepared_pull_request(
+            PreparedPullRequest("safe", shown, ()),
+            lambda _: pytest.fail("transformed credentials reached publication"),
+        )
 
 
 def test_credential_assignment_blocks_but_placeholders_do_not() -> None:

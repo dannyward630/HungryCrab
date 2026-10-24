@@ -1098,9 +1098,18 @@ def _attribution_section(record: AttributionRecord, attribution_file: str) -> st
     spdx = _inline(source.license) if source.license else "no licence declared"
     taken_from = (
         f"Taken from {_code(f'{source.label}@{source.sha[:7]}')} "
-        f"({spdx}, mode {_inline(record.mode)}): {_sentence(record.obligation.text)}"
+        f"({spdx}, mode {_inline(record.mode)}):"
     )
-    lines = ["## Attribution", "", taken_from, "", "| Into | From | |", "|---|---|---|"]
+    lines = [
+        "## Attribution",
+        "",
+        taken_from,
+        "",
+        quote_receipt_text(_sentence(record.obligation.text)),
+        "",
+        "| Into | From | |",
+        "|---|---|---|",
+    ]
     for item in sorted(record.taken, key=_taken_key):
         how = "verbatim" if item.verbatim else "adapted"
         lines.append(f"| {cell(_code(item.maw_path))} | {cell(_code(item.prey_path))} | {how} |")
@@ -1196,6 +1205,8 @@ def prepare_copy_pull_request(
         texts=texts,
         checks=receipt.checks,
     )
+    # New publications must obey exactly the same schema as later reads of their history.
+    record = AttributionRecord.from_dict(record.to_dict())
     records = add_attribution(load_attributions(maw_root), record)
     recorded = next(item for item in records if item.identity == record.identity)
 

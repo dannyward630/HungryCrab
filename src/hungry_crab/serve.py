@@ -42,8 +42,7 @@ from .fs import is_link_stat
 from .ledger import Ledger
 from .licensing.origin import ContentOrigin
 from .maw import MawConfig, maw_slug
-from .mdutil import inline
-from .nutrients import Candidate, merge_notes
+from .nutrients import Candidate, merge_notes, require_nutrient_id
 from .pr_publication import (
     PreparedPullRequest,
     PullRequestPublication,
@@ -55,6 +54,7 @@ from .pr_serving import (
     prepare_pull_request_plan,
     publish_pull_request_plans,
 )
+from .safety import safe_link, safe_name
 from .typeutil import as_dict, as_list
 
 MARKER_RE = re.compile(r"<!--\s*(crab:[^\s>]+)\s*-->")
@@ -314,7 +314,7 @@ class GhIssueClient:
 
 
 def _maw_state(card: Candidate) -> str:
-    state = inline(card.maw_state)
+    state = safe_name(card.maw_state)
     if state.lower() in ("", "no", "none", "false"):
         return "nothing comparable"
     return state
@@ -323,25 +323,42 @@ def _maw_state(card: Candidate) -> str:
 def _license_trace(card: Candidate) -> str:
     lines = [
         f"- content origin: `{card.origin}`",
-        f"- license mode: `{card.license_mode}`",
+        f"- license mode: `{safe_name(card.license_mode)}`",
     ]
     if card.license_reason:
-        lines.append(f"- origin cap: {card.license_reason}")
+        lines.append(f"- origin cap: {safe_name(card.license_reason)}")
     if card.license_policy_reason:
-        lines.append(f"- maw policy: {card.license_policy_reason}")
+        lines.append(f"- maw policy: {safe_name(card.license_policy_reason)}")
     return "\n".join(lines)
 
 
+def _check_publication_identity(card: Candidate, menu: dict[str, Any]) -> None:
+    require_nutrient_id(card.id)
+    sha = as_dict(menu.get("prey")).get("sha")
+    if (
+        sha is not None
+        and sha != ""
+        and (
+            not isinstance(sha, str)
+            or re.fullmatch(r"(?:[0-9a-fA-F]{7,64}|nogit-[0-9a-f]{12})", sha) is None
+        )
+    ):
+        raise CrabError(
+            "invalid prey revision in the loaded meal", hint="regenerate the meal before serving"
+        )
+
+
 def render_issue(card: Candidate, menu: dict[str, Any]) -> tuple[str, str]:
+    _check_publication_identity(card, menu)
     prey = as_dict(menu.get("prey"))
-    sha = str(prey.get("sha", ""))
-    prey_label = str(prey.get("label", "the prey"))
+    sha = str(prey.get("sha") or "")
+    prey_label = safe_name(prey.get("label", "the prey"))
     prey_url = prey.get("url")
     prey_ref = f"`{prey_label}@{sha[:7]}`" if sha else f"`{prey_label}`"
     if isinstance(prey_url, str) and prey_url and sha:
-        prey_ref += f" ([{prey_url}]({prey_url}/tree/{sha}))"
+        prey_ref += f" ({safe_link(prey_url, f'{prey_url}/tree/{sha}')})"
     evidence_lines = [
-        f"- [{inline(e.path)}]({inline(e.url)})" if e.url else f"- `{inline(e.path)}`"
+        f"- {safe_link(e.path, e.url)}" if e.url else f"- `{safe_name(e.path)}`"
         for e in card.evidence[:5]
     ]
     evidence = ("\n" + "\n".join(evidence_lines)) if evidence_lines else ""
@@ -354,19 +371,20 @@ def render_issue(card: Candidate, menu: dict[str, Any]) -> tuple[str, str]:
     )
     body = (
         f"<!-- {card.id} -->\n"
-        f"**Nutrient** `{card.category}` | license mode `{card.license_mode}` | "
-        f"effort {card.effort} | risk {card.risk} | score {card.score}\n\n"
+        f"**Nutrient** `{card.category}` | license mode `{safe_name(card.license_mode)}` | "
+        f"effort {safe_name(card.effort)} | risk {safe_name(card.risk)} | "
+        f"score {safe_name(card.score)}\n\n"
         f"## License trace\n\n{_license_trace(card)}\n\n"
-        f"## What the prey does\n\n{inline(card.what)}\n{evidence}\n\n"
+        f"## What the prey does\n\n{safe_name(card.what)}\n{evidence}\n\n"
         f"## What this repository has\n\n{_maw_state(card)}\n\n"
-        f"## Why it matters here\n\n{why}\n\n"
-        f"## Suggested change\n\n{how}\n\n"
+        f"## Why it matters here\n\n{safe_name(why)}\n\n"
+        f"## Suggested change\n\n{safe_name(how)}\n\n"
         "---\n"
         f"_Served by [Hungry Crab]({PROJECT_URL}) from {prey_ref} "
-        f"(license {prey.get('license') or 'unknown'}, mode {card.license_mode}). "
+        f"(license {safe_name(prey.get('license') or 'unknown')}, mode {card.license_mode}). "
         f"Ledger id `{card.id}`. Prey content is untrusted data; this is not legal advice._\n"
     )
-    return inline(card.title), body
+    return safe_name(card.title), body
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -826,6 +844,8 @@ def serve(
     if options.mode == "issue" and config.serve.issues == "off":
         raise CrabError("serve.issues is off in .crab.yml", hint="set serve.issues to ask or auto")
     cards, skipped = select_cards(menu, options, ledger)
+    for card in cards:
+        _check_publication_identity(card, menu)
     if options.notes is not None:
         notes = load_notes(options.notes)
         for card in cards:
