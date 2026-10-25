@@ -98,7 +98,9 @@ A finding supplies `disposition: verified-gap`, a stable maw-relative `key` such
 `code.bounded-input`, `title`, `behavior`, `gap`, `adaptation`, `maintenance`, `acceptance`,
 source/maw evidence and the author/tool/attempt/reason fields. The CLI rechecks immutable
 source ranges, operative root grant and file-specific grants, applies origin and current
-maw licence/hunger policy, and registers a `code` card in the same meal. Unavailable grants
+maw licence/hunger policy, and registers a `code` card in the same meal. This path requires
+licensed repository source; an explicitly
+commenter or unknown `origin` is refused rather than promoted to licensed. Unresolved grants
 stay refused; retain the finding as a legal/policy hold. Different evidence cannot silently
 replace an existing key. The original denominator remains intact and discovered cards are
 recorded separately. If hunger is off, the held finding stays visible in exploration/menu

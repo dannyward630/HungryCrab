@@ -34,13 +34,14 @@ STREAMING = (
 
 
 def pair(
-    tmp_path: Path, *, gap: bool = True, hunger: str = "ideas-only"
+    tmp_path: Path, *, gap: bool = True, hunger: str = "ideas-only", header: str = ""
 ) -> tuple[Path, Path, Path, dict[str, Any]]:
     donor = repository(
         tmp_path / "donor",
         {
             "reader.py": (
-                "def blocks(stream):\n    while chunk := stream.read(1024):\n        yield chunk\n"
+                header + "def blocks(stream):\n"
+                "    while chunk := stream.read(1024):\n        yield chunk\n"
             )
         },
     )
@@ -188,6 +189,24 @@ def test_hunger_hold_is_visible_and_does_not_change_policy(tmp_path: Path) -> No
     menu = load_menu(directory.parent.parent)
     assert menu is not None and menu["discovered_candidates"] and not menu["candidates"]
     assert (maw / ".crab.yml").read_bytes() == original
+
+
+@pytest.mark.parametrize("origin", ["commenter", "unknown"])
+def test_registration_cannot_widen_an_explicit_content_origin(tmp_path: Path, origin: str) -> None:
+    directory, donor, _, finding = pair(tmp_path)
+    finding["origin"] = origin
+    with pytest.raises(CrabError, match="origins cannot be widened"):
+        register(directory, finding, source_repo=donor)
+    assert not events(directory)
+
+
+def test_registration_rechecks_operative_file_grant(tmp_path: Path) -> None:
+    directory, donor, _, finding = pair(
+        tmp_path, header="# SPDX-License-Identifier: GPL-3.0-only\n"
+    )
+    with pytest.raises(CrabError, match=r"licen[cs]e|SPDX"):
+        register(directory, finding, source_repo=donor)
+    assert not events(directory)
 
 
 @pytest.mark.parametrize("side", ["source_evidence", "maw_evidence"])

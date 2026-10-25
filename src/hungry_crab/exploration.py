@@ -470,6 +470,11 @@ def register(directory: Path, finding: dict[str, Any], *, source_repo: Path) -> 
         data = _snapshot(directory)
         if finding.get("disposition") != "verified-gap":
             raise CrabError("only an evidenced verified gap can register a behavior nutrient")
+        if finding.get("origin", "licensed") != "licensed":
+            raise CrabError(
+                "behavior registration requires licensed repository source; "
+                "commenter and unknown origins cannot be widened to licensed"
+            )
         for key in (
             "key",
             "title",
