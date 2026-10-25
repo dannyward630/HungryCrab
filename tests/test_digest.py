@@ -154,6 +154,22 @@ def test_a_digest_from_an_older_crab_is_not_reused(npm_app: Path, tmp_path: Path
     assert not run_digest(Target(path=npm_app), DigestOptions(**options.__dict__)).cached
 
 
+def test_same_version_pre_review_licence_policy_cache_is_remined(
+    npm_app: Path, tmp_path: Path
+) -> None:
+    options = DigestOptions(out=tmp_path / "out", now=FIXED_NOW, cache_root=tmp_path / "cache")
+    first = run_digest(Target(path=npm_app), options)
+    manifest_path = first.out_dir / "manifest.json"
+    old = json.loads(manifest_path.read_text(encoding="utf-8"))
+    old["analysis_identity"]["license_provenance"] = 2
+    manifest_path.write_text(json.dumps(old), encoding="utf-8")
+    refreshed = run_digest(Target(path=npm_app), DigestOptions(**options.__dict__))
+    assert not refreshed.cached
+    assert refreshed.manifest["crab_version"] == old["crab_version"]
+    assert refreshed.manifest["prey"]["sha"] == old["prey"]["sha"]
+    assert run_digest(Target(path=npm_app), DigestOptions(**options.__dict__)).cached
+
+
 def test_a_digest_without_a_coverage_record_is_not_reused(npm_app: Path, tmp_path: Path) -> None:
     """Builds share a development version; the missing coverage block dates a digest."""
     options = DigestOptions(out=tmp_path / "out", now=FIXED_NOW, cache_root=tmp_path / "cache")
@@ -323,10 +339,7 @@ def test_digest_of_a_plain_directory_without_git(tmp_path: Path) -> None:
         tmp_path / "plain",
         {
             "README.md": "# Plain\n\n## Usage\n\nRun it.\n",
-            "LICENSE": "MIT License\n\nPermission is hereby granted, free of charge, to any person "
-            "obtaining a copy of this software, to deal in the Software without restriction. "
-            "The above copyright notice and this permission notice shall be included in all "
-            "copies or substantial portions of the Software.\n",
+            "LICENSE": (Path(__file__).parents[1] / "LICENSE").read_text(encoding="utf-8"),
             "src/app.py": "print('hi')\n",
         },
     )

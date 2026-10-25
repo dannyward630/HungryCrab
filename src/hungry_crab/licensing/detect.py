@@ -6,17 +6,27 @@ import json
 import re
 import stat
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..fs import is_link_stat, read_text
-from .matrix import LicenseClass, classify, normalize, restriction_rank, restricts_copying
+from .matrix import (
+    LicenseClass,
+    canonical_expression,
+    classify,
+    license_terms,
+    normalize,
+    parse_expression,
+    restriction_rank,
+    restricts_copying,
+    selected_terms,
+)
 
 _SPDX_ID_RE = re.compile(
-    r"SPDX-License-Identifier:\s*([A-Za-z0-9.+\-]+(?:\s+(?:OR|AND|WITH)\s+[A-Za-z0-9.+\-]+)*)",
-    re.IGNORECASE,
+    r"^[ \t]*(?:(?://|\#|/\*|\*|<!--)[ \t]*)?SPDX-License-Identifier:[ \t]*(.+?)[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
 )
 _LICENSE_FILE_RE = re.compile(
     r"^(LICENSE|LICENCE|COPYING|UNLICENSE|COPYRIGHT)(?:[-_.].*)?$", re.IGNORECASE
@@ -55,7 +65,6 @@ _SPLIT_RE = re.compile(
     r"|licensed as follows"
     r"|licens\w* transition|transitioning from the"
     r"|remain licensed under"
-    r"|dual[- ]licen[cs]ed"
     r"|are not licensed"
     # Timescale's root file: "Source code in this repository is variously licensed under ...".
     r"|variously licen[cs]ed"
@@ -259,6 +268,33 @@ def license_name_from_file(name: str) -> str | None:
     return None
 
 
+def combined_root_grant(grants: Mapping[str, str]) -> str | None:
+    """Combine proven root texts; named components cannot override an explicit expression."""
+    explicit = [grant for name, grant in grants.items() if license_name_from_file(name) is None]
+    if explicit:
+        primary = explicit[0]
+        canonical = canonical_expression(primary)
+        components = {canonical_expression(term) for term in license_terms(primary)}
+        if any(canonical_expression(grant) != canonical for grant in explicit):
+            return None
+        if any(
+            canonical_expression(grant) not in components | {canonical} for grant in grants.values()
+        ):
+            return None
+        return normalize(primary)
+    distinct = sorted(set(grants.values()))
+    if not distinct:
+        return None
+    if len(distinct) == 1:
+        return normalize(distinct[0])
+    alternatives = set(distinct) <= {"MIT", "Apache-2.0"} and all(
+        _NAMED_LICENSE_RE.match(name) and license_name_from_file(name) == grant
+        for name, grant in grants.items()
+    )
+    operator = " OR " if alternatives else " AND "
+    return normalize(operator.join(f"({grant})" for grant in distinct))
+
+
 def licenses_mentioned(text: str) -> list[str]:
     """SPDX ids named in prose, for a file that says several licenses apply."""
     lowered = _norm(text)
@@ -266,6 +302,8 @@ def licenses_mentioned(text: str) -> list[str]:
     for phrase, spdx in _MENTIONS:
         if phrase in lowered and spdx not in found:
             found.append(spdx)
+    if re.search(r"\bmit\b", lowered) and "MIT" not in found:
+        found.append("MIT")
     # "affero general public license" also contains "general public license".
     if "AGPL-3.0-only" in found or "LGPL-3.0-only" in found:
         found = [item for item in found if item != "GPL-3.0-only"]
@@ -285,10 +323,20 @@ def _norm(text: str) -> str:
 
 
 def find_spdx_identifier(text: str) -> str | None:
-    match = _SPDX_ID_RE.search(text)
-    if not match:
-        return None
-    return normalize(match.group(1).strip().rstrip("*/-> "))
+    found: str | None = None
+    for index, match in enumerate(_SPDX_ID_RE.finditer(text)):
+        expression = re.sub(r"[ \t]*(?:\*/|-->)$", "", match.group(1)).strip()
+        if (
+            index >= 64
+            or re.fullmatch(r"[A-Za-z0-9.+()\- \t]+", expression) is None
+            or parse_expression(expression) is None
+        ):
+            return "NOASSERTION"
+        ident = normalize(expression)
+        if found is not None and canonical_expression(found) != canonical_expression(ident):
+            return "NOASSERTION"
+        found = ident
+    return found
 
 
 # Every GNU licence carries the first phrase in its own text, and every GNU per-file notice
@@ -312,20 +360,27 @@ def _detect_gnu(head: str, normalized: str = "") -> tuple[str | None, float]:
         return None, 0.0
     if not any(phrase in (normalized or head) for phrase in _GNU_OPERATIVE):
         return None, 0.0
+    title = re.search(r"\bgnu (?:(affero|lesser|library) )?general public license\b", head)
+    if title is None:
+        return None, 0.0
+    family = title.group(1) or ""
+    # The first named GNU grant determines the family; a later preamble mention of LGPL
+    # cannot turn a reformatted GPL title into LGPL. Version evidence stays near that title.
+    version_text = head[title.end() : title.end() + 180]
     later = "any later version" in head
-    if "affero" in head:
+    if family == "affero":
         return ("AGPL-3.0-or-later" if later else "AGPL-3.0-only"), 0.95
-    if "lesser general public license" in head or "library general public license" in head:
-        if "version 3" in head:
+    if family in {"lesser", "library"}:
+        if "version 3" in version_text:
             return ("LGPL-3.0-or-later" if later else "LGPL-3.0-only"), 0.95
-        if "version 2.1" in head:
+        if "version 2.1" in version_text:
             return ("LGPL-2.1-or-later" if later else "LGPL-2.1-only"), 0.95
-        return "LGPL-2.0-only", 0.8
-    if "version 3" in head:
+        return ("LGPL-2.0-only", 0.95) if "version 2" in version_text else (None, 0.0)
+    if "version 3" in version_text:
         return ("GPL-3.0-or-later" if later else "GPL-3.0-only"), 0.95
-    if "version 2" in head:
+    if "version 2" in version_text:
         return ("GPL-2.0-or-later" if later else "GPL-2.0-only"), 0.95
-    return "GPL-3.0-only", 0.6
+    return None, 0.0
 
 
 # "Covered by a triple license under AGPL-3.0, SSPL and the Elastic License": a choice, and one of
@@ -353,9 +408,33 @@ def detect_from_text(text: str) -> tuple[str | None, float]:
     if not text.strip():
         return None, 0.0
     ident = find_spdx_identifier(text)
+    body = _SPDX_ID_RE.sub("", text) if ident else text
+    normalized = _norm(body)
+    # An MIT-looking grant must account for the operative text, including appended riders.
+    # A tag embedded in that same document cannot overrule contradictory terms.
+    if "permission is hereby granted, free of charge" in normalized:
+        grant = _detect_mit(body)
+        if ident and canonical_expression(ident) != canonical_expression(grant[0]):
+            return None, 0.0
+        return grant
+    if re.search(
+        r"\b(?:non[- ]commercial|no redistribution|internal use only|enterprise subscription"
+        r"|shall be used for good|human[- ]rights restrictions?)\b"
+        r"|\b(?:commercial use|model training)\b.{0,40}\b(?:prohibited|forbidden|not permitted)\b"
+        r"|\b(?:may|must) not\b.{0,80}\b(?:hosted|managed) service\b",
+        normalized,
+    ):
+        return None, 0.0
     if ident:
-        return ident, 0.99
-    normalized = _norm(text)
+        remaining = [line.strip() for line in body.splitlines() if line.strip()]
+        if not remaining or all(_copyright_metadata(line) for line in remaining):
+            return ident, 0.99
+        detected_grant, confidence = detect_from_text(body)
+        if canonical_expression(detected_grant) == canonical_expression(ident):
+            return ident, confidence
+        return None, 0.0
+    if _mit_apache_choice(normalized):
+        return "MIT OR Apache-2.0", 0.95
     head = normalized[:700]
     if not _offers_an_open_choice(text, normalized):
         for spdx, required, forbidden in _SOURCE_AVAILABLE_SIGNATURES:
@@ -369,6 +448,146 @@ def detect_from_text(text: str) -> tuple[str | None, float]:
             return spdx, 0.95
     if "all rights reserved" in normalized and len(normalized) < 3000:
         return "LicenseRef-Proprietary", 0.5
+    return None, 0.0
+
+
+def _mit_apache_choice(text: str) -> bool:
+    """Only a complete established choice statement, never arbitrary enclosing custom terms."""
+    if len(text) > 500:
+        return False
+    mit = r"(?:the )?mit(?: license)?"
+    apache = r"(?:the )?apache(?:-2\.0| license(?:,? version)? 2\.0)"
+    prefix = (
+        r"(?:(?:this (?:project|software|repository) is )?"
+        r"(?:dual[- ]licensed(?: under)?|licensed under either"
+        r"|licensed under|your choice of)[: ]+)?"
+        r"(?:you may use it under )?"
+    )
+    branches = rf"(?:{mit} or (?:under )?{apache}|{apache} or (?:under )?{mit})"
+    return (
+        re.fullmatch(prefix + branches + r"(?:,? at your (?:option|choice))?\.?", text) is not None
+    )
+
+
+_MIT_GRANT = (
+    "permission is hereby granted, free of charge, to any person obtaining a copy of this "
+    'software and associated documentation files (the "software"), to deal in the software '
+    "without restriction, including without limitation the rights to use, copy, modify, merge, "
+    "publish, distribute, sublicense, and/or sell copies of the software, and to permit persons "
+    "to whom the software is furnished to do so"
+)
+_MIT_NOTICE = (
+    "the above copyright notice and this permission notice shall be included in all copies or "
+    "substantial portions of the software."
+)
+_MIT_WARRANTY = (
+    'the software is provided "as is", without warranty of any kind, express or implied, '
+    "including but not limited to the warranties of merchantability, fitness for a particular "
+    "purpose and noninfringement. in no event shall the authors or copyright holders be liable "
+    "for any claim, damages or other liability, whether in an action of contract, tort or "
+    "otherwise, arising from, out of or in connection with the software or the use or other "
+    "dealings in the software."
+)
+
+
+def _copyright_metadata(line: str) -> bool:
+    """Recognize a bounded year/holder notice, never arbitrary copyright-prefixed prose.
+
+    Unrecognized notices need review. Holder names allow identifiers, capitalized name words,
+    conventional connectors/initials/company suffixes and a final contact address.
+    """
+    line = re.sub(r"^(?://|\#|/\*|\*|<!--)\s*", "", line.strip())
+    line = re.sub(r"\s*(?:\*/|-->)$", "", line).strip()
+    match = re.fullmatch(
+        r"(?:copyright\s*(?:(?:\(c\)|\u00a9)\s*)?|spdx-filecopyrighttext:\s*|\u00a9\s*)"
+        r"\d{4}(?:\s*[-,]\s*\d{2,4})*\s+(.{1,300})",
+        line.strip(),
+        re.I,
+    )
+    if match is None:
+        return False
+    holder = match.group(1)
+    # Contacts and the conventional reservation can follow each other, with terminal
+    # punctuation. Remove only these complete suffixes, in a bounded number of passes.
+    for _ in range(3):
+        previous = holder
+        holder = re.sub(r"\s+all rights reserved\.?$", "", holder.removesuffix("."), flags=re.I)
+        holder = re.sub(r"\s+<(?:[^\s<>@]+@[^\s<>@]+|https://[^\s<>]+)>$", "", holder)
+        if holder == previous:
+            break
+    words = holder.split()
+    if not words or len(words) > 16:
+        return False
+    # Longer unstructured phrases are not a holder-name field. In particular, capitalization
+    # cannot turn a sentence after the owner into metadata. Recognize explicit name forms.
+    connectors = {"and", "of", "the", "de", "van", "von"}
+    groups = holder.split(" and ")
+    name_form = all(
+        0 < sum(word.casefold() not in connectors for word in group.split()) <= 2
+        for group in groups
+    )
+    initials = all(re.fullmatch(r"(?:[A-Z]\.){1,6}", word) for word in words[:-1])
+    entity_suffixes = {
+        "inc",
+        "ltd",
+        "corp",
+        "co",
+        "llc",
+        "foundation",
+        "association",
+        "institute",
+        "corporation",
+        "authors",
+        "contributors",
+    }
+    organization = words[-1].rstrip(",.").casefold() in entity_suffixes and (
+        len(words) <= 3
+        or (
+            len(words) == 4
+            and words[-2].rstrip(",.").casefold() in entity_suffixes
+            and words[-1].rstrip(",.").casefold() in {"inc", "ltd", "corp", "co", "llc"}
+        )
+    )
+    university = any(
+        holder.casefold().startswith(prefix) and len(holder[len(prefix) :].split()) <= 2
+        for prefix in ("university of ", "the university of ")
+    )
+    if not (name_form or initials or organization or university):
+        return False
+    for word in words:
+        word = word.rstrip(",")
+        if re.fullmatch(r"(?:[A-Z]\.){1,6}", word):
+            continue
+        if word.casefold() in {"inc.", "ltd.", "corp.", "co."}:
+            continue
+        plain = word.replace("-", "").replace("'", "").replace("\u2019", "")
+        if not plain.isalnum():
+            return False
+        if len(words) > 1 and word not in connectors and word[:1].islower():
+            return False
+    return True
+
+
+def _detect_mit(text: str) -> tuple[str | None, float]:
+    start = re.search(r"permission\s+is\s+hereby\s+granted,\s*free\s+of\s+charge", text, re.I)
+    if start is None or start.start() > 1500:
+        return None, 0.0
+    body = _norm(text[start.start() :])
+    title = re.compile(
+        r"(?:(?:the )?mit(?:-0| no attribution)?(?: license)?(?: \(mit\))?|expat license)[.:]?"
+    )
+    for raw in text[: start.start()].splitlines():
+        line = _norm(raw.strip("#/* \t"))
+        if not line or title.fullmatch(line) or line == "all rights reserved.":
+            continue
+        if not _copyright_metadata(raw.strip("#/* \t")):
+            return None, 0.0
+    mit = f"{_MIT_GRANT}, subject to the following conditions: {_MIT_NOTICE} {_MIT_WARRANTY}"
+    mit0 = f"{_MIT_GRANT}. {_MIT_WARRANTY}"
+    if body == mit:
+        return "MIT", 0.99
+    if body == mit0:
+        return "MIT-0", 0.99
     return None, 0.0
 
 
@@ -488,7 +707,7 @@ class LicenseFindings:
 def _same_family(a: str | None, b: str | None) -> bool:
     if a is None or b is None:
         return a == b
-    if a == b:
+    if canonical_expression(a) == canonical_expression(b):
         return True
     fam_a = a.split("-")[0].upper()
     fam_b = b.split("-")[0].upper()
@@ -673,13 +892,41 @@ def detect_in_repo(
     alternatives = True  # every named file used the `LICENSE-<name>` form: a choice, not a split
     split_mentions: list[str] = []
     root_declares_split = False
+    directory_grants: list[tuple[str, str | None]] = []
     for rel, declared in _license_candidates(root, entries, findings, allowed_files):
+        if "/" in rel:
+            directory_grants.append((rel, declared))
+            continue
         path = root / rel
         text = read_text(path, limit=200_000)
         spdx, confidence = detect_from_text(text)
         note = ""
-        if spdx is None and declared:
-            spdx, note, confidence = declared, "from the file name", 0.6
+        if spdx is None:
+            # A short root pointer may designate a readable grant inside this tree. Its name,
+            # a manifest classifier or the API can never replace unreadable operative terms.
+            pointer = re.fullmatch(r"\s*(?:see|license(?: is)? in)\s+([\w./-]+)[.\s]*", text, re.I)
+            if pointer:
+                target = pointer.group(1).rstrip(".")
+                parts = PurePosixPath(target).parts
+                parent = root
+                safe_parents = (
+                    bool(parts) and not PurePosixPath(target).is_absolute() and ".." not in parts
+                )
+                for part in parts[:-1] if safe_parents else ():
+                    parent = parent / part
+                    if not _own_entry(parent, stat.S_ISDIR):
+                        safe_parents = False
+                        break
+                if (
+                    parts
+                    and not PurePosixPath(target).is_absolute()
+                    and ".." not in parts
+                    and safe_parents
+                    and (allowed_files is None or target in allowed_files)
+                    and _own_entry(root / target, stat.S_ISREG)
+                ):
+                    spdx, confidence = detect_from_text(read_text(root / target, limit=200_000))
+                    note = "readable referenced grant" if spdx else "unreadable referenced grant"
         findings.license_files.append(rel)
         findings.evidence.append(Evidence("file", rel, spdx, confidence, note))
         if spdx and declared:
@@ -690,12 +937,6 @@ def detect_in_repo(
             for mention in licenses_mentioned(text):
                 if mention not in split_mentions:
                     split_mentions.append(mention)
-
-    primary = max(
-        (e for e in findings.evidence if e.source == "file" and e.spdx),
-        key=lambda e: e.confidence,
-        default=None,
-    )
 
     for rel in manifests:
         path = root / rel
@@ -708,20 +949,97 @@ def detect_in_repo(
     if api_spdx and api_spdx.upper() != "NOASSERTION":
         findings.evidence.append(Evidence("api", "repos/{owner}/{repo}", normalize(api_spdx), 0.9))
 
+    # A REUSE text supplies a declared grant; an asset's licence does not declare a root grant.
+    declarations = {
+        term
+        for item in findings.evidence
+        if item.source != "api"
+        for term in license_terms(item.spdx)
+    }
+    if code_files and not declarations:
+        headers = [find_spdx_identifier(read_text(root / rel, limit=4000)) for rel in code_files]
+        if all(headers):
+            declarations = {term for header in headers for term in license_terms(header)}
+    for rel, declared in directory_grants:
+        spdx, confidence = detect_from_text(read_text(root / rel, limit=200_000))
+        if declared in declarations and canonical_expression(spdx) == canonical_expression(
+            declared
+        ):
+            findings.license_files.append(rel)
+            findings.evidence.append(
+                Evidence("file", rel, spdx, confidence, "REUSE declared grant")
+            )
+        else:
+            findings.exceptions.append(
+                {
+                    "path": rel,
+                    "spdx": spdx or "NOASSERTION",
+                    "kind": "nested-license",
+                    "scope": "unknown",
+                }
+            )
+    primary = max(
+        (e for e in findings.evidence if e.source == "file" and e.spdx),
+        key=lambda e: e.confidence,
+        default=None,
+    )
+    if (
+        primary is not None
+        and directory_grants
+        and all("/" in item.path for item in findings.evidence if item.source == "file")
+    ):
+        declaration = next(
+            (
+                item.spdx
+                for item in findings.evidence
+                if item.source == "manifest"
+                and item.spdx
+                and set(selected_terms(item.spdx)) <= declarations
+            ),
+            None,
+        )
+        if declaration:
+            primary = Evidence(
+                "file", primary.path, declaration, primary.confidence, "REUSE declared grant"
+            )
+
     if primary is not None:
         findings.spdx, findings.confidence = primary.spdx, primary.confidence
         findings.resolution = "single"
+        if primary.note == "REUSE declared grant" and " AND " in (primary.spdx or ""):
+            findings.resolution = "split"
+            findings.candidates = list(license_terms(primary.spdx))
         distinct = sorted({spdx for _, spdx in named})
-        findings.candidates = distinct
+        findings.candidates = distinct or findings.candidates
         if len(distinct) > 1:
             # `LICENSE-MIT` next to `LICENSE-APACHE` offers a choice. `cc-by-4.0.LICENSE` next to
             # `apache-2.0.LICENSE` does not: those cover different parts of the repository, and
             # picking the nicer one is how a documentation license gets ignored.
             docs = any(classify(spdx).value.startswith("docs") for spdx in distinct)
-            if alternatives and not docs:
-                findings.resolution = "dual"
-                findings.spdx = " OR ".join(distinct)
-                findings.notes.append("several named license files: treated as dual licensing")
+            known_alternatives = set(distinct) <= {"MIT", "Apache-2.0"}
+            if alternatives and not docs and known_alternatives:
+                established = combined_root_grant(
+                    {
+                        item.path: item.spdx
+                        for item in findings.evidence
+                        if item.source == "file" and "/" not in item.path and item.spdx
+                    }
+                )
+                expression = parse_expression(established or "")
+                if expression is None:
+                    findings.spdx = "NOASSERTION"
+                    findings.resolution = "unreadable"
+                    findings.conflicts.append("root licence expressions disagree")
+                else:
+                    findings.spdx = established
+                    findings.resolution = (
+                        "dual"
+                        if expression.op == "OR"
+                        else "split"
+                        if expression.op == "AND"
+                        else "single"
+                    )
+                    findings.notes.append("named licence texts retain the explicit root expression")
             else:
                 findings.resolution = "split"
                 findings.spdx = " AND ".join(distinct)
@@ -730,6 +1048,13 @@ def detect_in_repo(
                     f"({', '.join(rel for rel, _ in named)}): every one of them is assumed to "
                     "apply somewhere, so the most restrictive wins"
                 )
+    elif findings.license_files:
+        findings.spdx = "NOASSERTION"
+        findings.resolution = "unreadable"
+        findings.conflicts.append("root licence text could not establish a grant")
+        findings.notes.append(
+            f"{', '.join(findings.license_files)} is unreadable: a human has to read it"
+        )
     else:
         fallback = max(
             (e for e in findings.evidence if e.spdx),
@@ -743,9 +1068,19 @@ def detect_in_repo(
         elif not findings.license_files:
             findings.notes.append("no license file, manifest declaration or API license")
 
+    if any(item.source == "file" and item.spdx is None for item in findings.evidence):
+        findings.spdx = "NOASSERTION"
+        findings.resolution = "unreadable"
+        findings.conflicts.append("an unreadable root licence leaves the grant unresolved")
     for item in findings.evidence:
-        if item.spdx and findings.spdx and item.spdx != findings.spdx:
+        if (
+            item.spdx
+            and findings.spdx
+            and canonical_expression(item.spdx) != canonical_expression(findings.spdx)
+        ):
             if " OR " in findings.spdx and item.spdx in findings.spdx.split(" OR "):
+                continue
+            if item.source == "file" and item.spdx in license_terms(findings.spdx):
                 continue
             if _same_family(item.spdx, findings.spdx) and item.source == "manifest":
                 findings.notes.append(
@@ -774,7 +1109,9 @@ def detect_in_repo(
             # A licence file the crab cannot read is still a licence file. Dropping it is how a
             # restricted subtree used to inherit the root's verdict without anyone being told.
             spdx = spdx or "NOASSERTION"
-            if spdx != findings.spdx:
+            if spdx == "NOASSERTION" or canonical_expression(spdx) != canonical_expression(
+                findings.spdx
+            ):
                 findings.exceptions.append(
                     {"path": rel, "spdx": spdx, "confidence": confidence, "kind": kind}
                 )

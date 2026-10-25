@@ -70,11 +70,12 @@ def test_mcp_menu_cannot_replace_cli_meal_with_underdeduplicated_candidates(
     assert nutrient_id in {item["id"] for item in before["hidden"]}
     assert nutrient_id not in {item["id"] for item in before["candidates"]}
 
-    mcp = AnalysisService([npm_app, pyproject_cli], cache).menu(
-        str(npm_app), str(pyproject_cli), limit=100
-    )
+    service = AnalysisService([npm_app, pyproject_cli], cache)
+    mcp = service.menu(str(npm_app), str(pyproject_cli), limit=1)
+    rest = service.menu(str(npm_app), str(pyproject_cli), offset=1, limit=100)
     assert mcp["meal_dir"] is None
-    assert nutrient_id in {item["id"] for item in mcp["candidates"]}
+    assert mcp["origin"] == "analysis-only"
+    assert nutrient_id in {item["id"] for item in [*mcp["candidates"], *rest["candidates"]]}
     assert {name: (cli.meal_dir / name).read_bytes() for name in MEAL_FILES} == saved
     assert load_menu(cli.meal_dir) == before
 
