@@ -1188,19 +1188,32 @@ def checked_attribution_file(maw_root: Path, name: str) -> str:
         )
     if target.exists():
         try:
-            head = target.read_text(encoding="utf-8")[:200]
+            current = target.read_text(encoding="utf-8")
         except (OSError, UnicodeError) as exc:
             raise publication_error(f"cannot read {name}: {exc}") from None
-        if not head.startswith(NOTICE_HEADING):
+        records = load_attributions(maw_root)
+        candidates = [render_notices(records), render_notices([])]
+        # A tracked generated pair authenticates the previous rendering when the
+        # operator edits receipts. A heading or generated-file claim proves nothing.
+        git = GitRunner(maw_root)
+        top = git.try_run("--no-replace-objects", "rev-parse", "--show-toplevel")
+        if top and Path(top.strip()).resolve() == root:
+            baseline = git.try_run("--no-replace-objects", "show", f"HEAD:{ATTRIBUTIONS_PATH}")
+            if baseline is not None:
+                candidates.append(render_notices(parse_attributions(baseline)))
+        if current not in candidates:
             raise publication_error(
-                f"attribution_file {name!r} is a file the crab did not write",
-                hint="name another file in .crab.yml; the crab overwrites only its own notice",
+                f"attribution_file {name!r} is a file the crab did not write or was edited",
+                hint="preserve this file and configure a separate attribution_file in .crab.yml; "
+                "or restore its verified receipts and generated notice from version control",
             )
     return name
 
 
 def base_receipts_kept(
     prepared: PreparedPullRequest,
+    *,
+    attribution_file: str = "THIRD_PARTY_NOTICES.md",
 ) -> Callable[[Callable[[str], str | None]], None]:
     """A check, for the moment the default branch is fetched, that no receipt on it is dropped.
 
@@ -1214,10 +1227,20 @@ def base_receipts_kept(
 
     def check(read_base: Callable[[str], str | None]) -> None:
         base = read_base(ATTRIBUTIONS_PATH)
+        notice = read_base(attribution_file)
+        if notice is not None and (
+            base is None or notice != render_notices(parse_attributions(base))
+        ):
+            raise publication_error(
+                "default branch has an unmanaged or edited attribution file",
+                hint="preserve it and configure a separate generated notice path before serving",
+            )
         if base is None or ours is None:
             return
-        kept = {record.identity for record in parse_attributions(ours)}
-        dropped = [record for record in parse_attributions(base) if record.identity not in kept]
+        kept = {record.identity: record for record in parse_attributions(ours)}
+        dropped = [
+            record for record in parse_attributions(base) if kept.get(record.identity) != record
+        ]
         if dropped:
             names = ", ".join(f"{r.nutrient_id}@{r.source.sha[:7]}" for r in dropped[:5])
             raise publication_error(
