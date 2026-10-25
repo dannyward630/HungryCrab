@@ -36,10 +36,7 @@ CATEGORIES: tuple[str, ...] = (
 # `.crab.yml` and a weight in `scoring.yml` that no meal can reach look exactly like a category
 # somebody forgot. Every entry here names the milestone that owes the producer, and
 # `tests/test_categories.py` refuses a declared category that is neither produced nor listed.
-DEFERRED_CATEGORIES: dict[str, str] = {
-    "code": "0.4 Deep Bite, postponed on 2026-10-22: symbol-level nutrients need a syntax index, "
-    "and the optional tree-sitter path waits for a real evidence gap",
-}
+DEFERRED_CATEGORIES: dict[str, str] = {}
 SERVE_AS: tuple[str, ...] = ("pr", "issue", "idea")
 EFFORTS: tuple[str, ...] = ("S", "M", "L")
 RISKS: tuple[str, ...] = ("low", "medium", "high")
@@ -188,6 +185,19 @@ class Candidate:
         # writes from the digest; `crab serve` refuses notes that quote an issue title from the
         # prey's own `issues.json`, and the eat skill says to write them in your own words.
         if self.origin == ContentOrigin.COMMENTERS.value:
+            identity = re.fullmatch(r"issue-lesson\.([a-z0-9.-]+)\.(cluster|top)-(\d+)", self.key)
+            if identity:
+                source, kind, number = identity.groups()
+                self.title = (
+                    f"Recurring issue theme {number} in {source}"
+                    if kind == "cluster"
+                    else f"Popular request in {source}: issue #{number}"
+                )
+                self.what = (
+                    f"Structured issue metadata for {source}, {kind} {number}. "
+                    "Inspect the linked issues; commenter prose is not carried into this card."
+                )
+                return
             self.title = "Issue-derived demand signal"
             self.what = (
                 "Issue metadata indicates unmet demand in the prey. Follow the linked issue "

@@ -136,10 +136,11 @@ def compare_digests(
     *,
     prey_root: Path | None = None,
     maw_root: Path | None = None,
+    prey_objects: Path | None = None,
     options: CompareOptions | None = None,
 ) -> CompareResult:
     opts = options or CompareOptions()
-    prey = Side.load(prey_dir, root=prey_root)
+    prey = Side.load(prey_dir, root=prey_root, objects=prey_objects)
     maw = Side.load(maw_dir, root=maw_root)
     if not opts.allow_partial:
         _refuse_partial(prey, maw, prey_dir, maw_dir)
@@ -206,6 +207,7 @@ def compare_digests(
             "license_review_reasons": review,
             "evidence_license_exceptions": exceptions,
         }
+    initial_candidates = [candidate.to_dict() for candidate in candidates]
     candidates, hidden = apply_hunger(candidates, opts.hunger)
     still: list[Candidate] = []
     for candidate in candidates:
@@ -237,12 +239,15 @@ def compare_digests(
             "license_class": prey.license.get("class"),
             "repository": repository,
             "ecosystems": sorted(prey.ecosystems),
+            "runtime_ecosystems": sorted(prey.compatible_ecosystems - prey.ecosystems),
+            "evidence_capability": prey.evidence_capability,
         },
         "maw": {
             "label": maw.label,
             "sha": maw.sha,
             "license": maw_spdx,
             "ecosystems": sorted(maw.ecosystems),
+            "runtime_ecosystems": sorted(maw.compatible_ecosystems - maw.ecosystems),
             "root": str(maw_root) if maw_root else None,
         },
         "verdict": verdict,
@@ -257,6 +262,7 @@ def compare_digests(
             "by_category": by_category,
         },
         "candidates": [c.to_dict() for c in candidates],
+        "initial_candidates": initial_candidates,
         "hidden": hidden,
     }
     return CompareResult(
@@ -354,11 +360,14 @@ def compare_for_maw(
     allow_partial: bool = False,
     record_ledger: bool = True,
     persist_meal: bool = True,
+    prey_digest_dir: Path | None = None,
+    prey_objects: Path | None = None,
 ) -> tuple[CompareResult, DigestResult, Ledger, MawConfig]:
     """The full maw-aware comparison: .crab.yml hunger and scoring, ledger and issue dedup."""
     config = MawConfig.load(maw_root)
     d_opts = replace(digest_options or DigestOptions(), budget_policy=config.budget.policy)
     ledger = Ledger.load(config.ledger_path(d_opts.cache_root), maw=maw_root.name)
+    ledger_input = ledger.to_dict(now=now)
     hidden = ledger.hidden_ids()
     if issue_lookup is not None:
         slug = maw_slug(maw_root)
@@ -393,9 +402,12 @@ def compare_for_maw(
         options=options,
         log=log,
         persist_meal=persist_meal,
+        prey_digest_dir=prey_digest_dir,
+        prey_objects=prey_objects,
     )
     if result.verdict["relationship"] != Relationship.FOREIGN.value:
         log(f"license relationship: {result.verdict['relationship']} (from .crab.yml trust)")
+    result.menu["analysis_inputs"] = {"ledger": ledger_input, "policy": config.raw}
     if record_ledger:
         new = ledger.record_meal(result.menu, result.candidates, now=now)
         saved = ledger.save(now=now)
@@ -403,6 +415,15 @@ def compare_for_maw(
             f"ledger: {new} new nutrients, {len(ledger.entries)} known"
             + (f", saved to {saved}" if saved else " (ledger mode: none)")
         )
+    from ..digest import worktree_fingerprint
+    from ..fetch.git import GitRunner
+
+    git = GitRunner(maw_root)
+    result.menu["post_comparison_worktree"] = worktree_fingerprint(
+        git if git.is_repo_root() else None, maw_root
+    )
+    if persist_meal and result.meal_dir is not None:
+        write_meal(result, result.meal_dir)
     return result, prey_digest, ledger, config
 
 
@@ -414,11 +435,33 @@ def run_compare(
     options: CompareOptions | None = None,
     log: Callable[[str], None] = _noop,
     persist_meal: bool = True,
+    prey_digest_dir: Path | None = None,
+    prey_objects: Path | None = None,
 ) -> tuple[CompareResult, DigestResult, DigestResult]:
     """Digest both sides and compare; only persist the CLI meal when requested."""
     d_opts = digest_options or DigestOptions()
     opts = options or CompareOptions()
-    prey_result = run_digest(prey_target, d_opts, log=log)
+    if prey_digest_dir is None:
+        if prey_objects is not None:
+            raise CrabError("--prey-objects requires --prey-digest")
+        prey_result = run_digest(prey_target, d_opts, log=log)
+    else:
+        side = Side.load(prey_digest_dir, objects=prey_objects)
+        if (
+            prey_target.slug is None
+            or side.url != prey_target.slug.url
+            or side.label.casefold() != prey_target.label.casefold()
+        ):
+            raise CrabError("donor digest identity does not match the requested public repository")
+        if (
+            not side.sha
+            or side.failed_miners
+            or digest_integrity_errors(prey_digest_dir, side.manifest)
+        ):
+            raise CrabError(
+                "donor digest is incomplete or inconsistent; reacquire the public artifact"
+            )
+        prey_result = DigestResult(prey_digest_dir, side.manifest, cached=True)
     maw_options = DigestOptions(
         depth=d_opts.depth,
         force=d_opts.force,
@@ -440,6 +483,7 @@ def run_compare(
         prey_root=prey_root if prey_root and prey_root.is_dir() else None,
         maw_root=maw_path,
         options=opts,
+        prey_objects=prey_objects,
     )
     if persist_meal:
         meal_dir = locate_meal(result.prey.label, result.prey.sha, maw_path, d_opts)

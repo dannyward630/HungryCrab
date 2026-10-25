@@ -32,6 +32,7 @@ def produced_categories() -> set[str]:
     """
     found = {rule.category for rule in TRAIT_RULES}
     source = Path(candidates.__file__).read_text(encoding="utf-8")
+    source += "\n" + (ROOT / "src/hungry_crab/exploration.py").read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
@@ -64,9 +65,9 @@ def test_every_declared_category_is_produced_or_deferred_by_name() -> None:
         )
 
 
-def test_code_is_the_one_deferred_category_today() -> None:
-    assert set(DEFERRED_CATEGORIES) == {"code"}
-    assert "code" not in produced_categories()
+def test_code_has_a_validated_registration_producer() -> None:
+    assert "code" not in DEFERRED_CATEGORIES
+    assert "code" in produced_categories()
 
 
 def test_the_config_and_the_weights_know_every_category_and_nothing_else() -> None:

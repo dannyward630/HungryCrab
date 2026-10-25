@@ -792,6 +792,15 @@ class InventoryMiner:
         data, extra = summarize(ctx.root, files, stats, root_entries)
         data["ignored"] = {"patterns": list(ctx.ignore), "files": ignored}
         data["coverage"] = coverage_block(files, stats, ignored)
+        # Selected regular paths travel with the digest. Comparison must never
+        # silently depend on the acquisition runner's absolute working-tree path.
+        data["evidence_files"] = sorted(
+            info.path for info in files if not (info.vendored or info.generated or info.lfs)
+        )
+        evidence_paths = set(data["evidence_files"])
+        data["evidence_lines"] = {
+            info.path: info.loc for info in files if info.path in evidence_paths
+        }
         warnings: list[str] = []
         if stats["truncated"]:
             warnings.append("file list truncated; use --depth deep for more")
