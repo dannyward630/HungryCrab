@@ -30,22 +30,48 @@ def add_loop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "tag",
         "metrics",
     ):
-        command = actions.add_parser(name)
-        command.add_argument("--maw", type=Path, default=Path())
+        descriptions = {
+            "init": "initialize persisted loop state from maw policy",
+            "status": "show phase, lease and pending work",
+            "next": "lease the next phase without executing it",
+            "record": "record one leased phase result and advance on success",
+            "hunt": "discover prey under the current HUNT lease",
+            "pause": "pause the loop and revoke its live lease",
+            "resume": "resume a paused loop under current policy",
+            "acknowledge": "record an explicit human decision about pending work",
+            "serve": "prepare the selected GROW nutrient through publication guards",
+            "publish": "publish the verified MOLT head and receipt",
+            "tag": "tag the verified human merge during HARDEN",
+            "metrics": "show persisted history and loop metrics",
+        }
+        command = actions.add_parser(name, help=descriptions[name])
+        command.add_argument("--maw", type=Path, default=Path(), help="maw repository (default: .)")
         command.add_argument(
             "--control",
             type=Path,
             default=None,
             help="state in a control repository; maw-owned policy remains authoritative",
         )
-        command.add_argument("--json", action="store_true")
+        command.add_argument("--json", action="store_true", help="print the result as JSON")
         if name in {"record", "serve", "publish", "tag", "hunt"}:
             command.add_argument("--token", required=True, help="lease token from loop next")
         if name == "record":
-            command.add_argument("--phase", required=True, choices=PHASES)
-            command.add_argument("--result", required=True, choices=("ok", "fail", "skip"))
-            command.add_argument("--note", default="")
-            command.add_argument("--receipt", type=Path)
+            command.add_argument(
+                "--phase",
+                required=True,
+                choices=PHASES,
+                help="phase whose leased work is being recorded",
+            )
+            command.add_argument(
+                "--result",
+                required=True,
+                choices=("ok", "fail", "skip"),
+                help="record success, failure or an explicit skip",
+            )
+            command.add_argument(
+                "--note", default="", help="operator explanation retained in the phase history"
+            )
+            command.add_argument("--receipt", type=Path, help="JSON receipt proving the phase work")
         if name == "acknowledge":
             command.add_argument(
                 "--drop-pr", default=None, help="human rejection of this round's GROW PR"
@@ -56,8 +82,15 @@ def add_loop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
                 help="human decision to end a round without implementation",
             )
         if name == "serve":
-            command.add_argument("--prey", required=True)
-            command.add_argument("--id", required=True, dest="nutrient_id")
+            command.add_argument(
+                "--prey", required=True, help="prey reference for the current GROW meal"
+            )
+            command.add_argument(
+                "--id",
+                required=True,
+                dest="nutrient_id",
+                help="stable nutrient id selected for GROW",
+            )
             command.add_argument(
                 "--receipt",
                 type=Path,
@@ -65,9 +98,16 @@ def add_loop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
             )
         if name == "publish":
             command.add_argument("--head", required=True, help="immutable local commit SHA")
-            command.add_argument("--title", required=True)
-            command.add_argument("--body-file", type=Path, required=True)
-            command.add_argument("--receipt", type=Path, required=True)
+            command.add_argument("--title", required=True, help="pull request title")
+            command.add_argument(
+                "--body-file",
+                type=Path,
+                required=True,
+                help="UTF-8 file containing the pull request body",
+            )
+            command.add_argument(
+                "--receipt", type=Path, required=True, help="JSON receipt proving the phase work"
+            )
 
 
 def cmd_loop(args: argparse.Namespace) -> int:

@@ -166,9 +166,11 @@ def _analysis_identity(ctx: MineContext) -> dict[str, object]:
         # Invalidate digests produced before ignored/personal files were excluded (#195).
         "file_selection": "git-visible-v1",
         # Re-mine same-version caches after the #436/#437 grant-establishment corrections.
-        "license_provenance": 3,
+        "license_provenance": 5,
         # Same-version caches may predate recognition of stdlib unittest CI commands.
-        "ci_tool_detection": "unittest-v1",
+        "ci_tool_detection": "shared-scripts-v3",
+        "runtime_detection": "first-party-v2",
+        "evidence_inventory": "portable-v1",
         "instruction_matching": "unicode-matching-v2",
     }
 

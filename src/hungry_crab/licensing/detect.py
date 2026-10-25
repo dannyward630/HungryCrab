@@ -500,19 +500,34 @@ def _copyright_metadata(line: str) -> bool:
     line = re.sub(r"\s*(?:\*/|-->)$", "", line).strip()
     match = re.fullmatch(
         r"(?:copyright\s*(?:(?:\(c\)|\u00a9)\s*)?|spdx-filecopyrighttext:\s*|\u00a9\s*)"
-        r"\d{4}(?:\s*[-,]\s*\d{2,4})*\s+(.{1,300})",
+        r"(.{1,350})",
         line.strip(),
         re.I,
     )
     if match is None:
         return False
     holder = match.group(1)
+    if re.search(
+        r"\b(?:use|licen[cs]e|permission|grant|paid|commercial|prohibit\w*|restrict\w*|redistribut\w*|requir\w*)\b",
+        holder,
+        re.I,
+    ):
+        return False
+    years = r"\d{4}(?:\s*[-,]\s*(?:\d{2,4}|present))*"
+    holder = re.sub(rf"^{years}\s+", "", holder, count=1, flags=re.I)
+    holder = re.sub(rf"\s+{years}$", "", holder, count=1, flags=re.I)
+    if len(holder) > 300:
+        return False
     # Contacts and the conventional reservation can follow each other, with terminal
     # punctuation. Remove only these complete suffixes, in a bounded number of passes.
     for _ in range(3):
         previous = holder
         holder = re.sub(r"\s+all rights reserved\.?$", "", holder.removesuffix("."), flags=re.I)
-        holder = re.sub(r"\s+<(?:[^\s<>@]+@[^\s<>@]+|https://[^\s<>]+)>$", "", holder)
+        holder = re.sub(
+            r"\s+<(?:[A-Za-z0-9._%+-]+[ \t]*@[ \t]*[A-Za-z0-9.-]+|https://[^\s<>]+)>$",
+            "",
+            holder,
+        )
         if holder == previous:
             break
     words = holder.split()
@@ -901,6 +916,9 @@ def detect_in_repo(
         text = read_text(path, limit=200_000)
         spdx, confidence = detect_from_text(text)
         note = ""
+        if spdx is None and "permission is hereby granted, free of charge" in _norm(text):
+            note = "MIT-like text has unsupported metadata or operative terms; inspect the "
+            note += "copyright prefix and full grant, or obtain a supported upstream notice"
         if spdx is None:
             # A short root pointer may designate a readable grant inside this tree. Its name,
             # a manifest classifier or the API can never replace unreadable operative terms.

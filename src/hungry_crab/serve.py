@@ -776,7 +776,11 @@ def _serve_pull_requests(
             list_marked_prs=lambda: client.list_marked_prs(slug),
             run_gh=client.run_gh,
             allow_create=allow_create,
-            base_guard=base_receipts_kept(prepared) if card.license_mode in COPY_MODES else None,
+            base_guard=(
+                base_receipts_kept(prepared, attribution_file=config.attribution_file)
+                if card.license_mode in COPY_MODES
+                else None
+            ),
         )
 
     plan = prepare_pull_request_plan(

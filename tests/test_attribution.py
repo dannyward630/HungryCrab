@@ -525,8 +525,13 @@ def test_missing_receipts_cannot_erase_the_notice(tmp_path: Path, tracked: bool)
     assert main(["attribution", "--maw", str(maw), "--check"]) == 1
     assert main(["attribution", "--maw", str(maw)]) == 1
     assert main(["attribution", "--maw", str(maw), "--check", "--allow-remove"]) == 1
-    assert main(["attribution", "--maw", str(maw), "--allow-remove"]) == 0
-    assert "Nothing has been carried" in notice.read_text(encoding="utf-8")
+    if tracked:
+        assert main(["attribution", "--maw", str(maw), "--allow-remove"]) == 0
+        assert "Nothing has been carried" in notice.read_text(encoding="utf-8")
+    else:
+        # Without the receipts or a tracked pair, ownership cannot be established.
+        assert main(["attribution", "--maw", str(maw), "--allow-remove"]) == 1
+        assert "crab:ci:ci.cache" in notice.read_text(encoding="utf-8")
 
 
 def test_github_source_case_does_not_create_duplicate_notice_sections() -> None:
@@ -1274,10 +1279,96 @@ def test_a_branch_never_drops_a_receipt_the_default_branch_holds(tmp_path: Path)
     prepared = _prepare(_maw(tmp_path))
     check = base_receipts_kept(prepared)
     check(lambda path: None)  # a default branch with no receipts yet
-    check(lambda path: prepared.files[1].content)  # the same receipts
+    files = {item.path: item.content for item in prepared.files}
+    check(files.get)  # the same verified receipts and notice
     merged_since = dump_attributions([_record(nutrient_id="crab:hygiene:hygiene.security-md")])
     with pytest.raises(CrabError, match="would drop receipts the default branch already holds"):
         check(lambda path: merged_since if path == ATTRIBUTIONS_PATH else None)
+
+
+@pytest.mark.parametrize("existing_receipts", [False, True])
+def test_unmanaged_and_edited_notices_are_preserved_before_publication(
+    tmp_path: Path, existing_receipts: bool
+) -> None:
+    maw = _maw(tmp_path)
+    if existing_receipts:
+        receipts = maw / ATTRIBUTIONS_PATH
+        receipts.parent.mkdir(parents=True, exist_ok=True)
+        receipts.write_text(dump_attributions([_record()]), encoding="utf-8")
+    notice = maw / "THIRD_PARTY_NOTICES.md"
+    text = render_notices([_record()]) if existing_receipts else "# Third-party notices\n"
+    text += "\nHuman-maintained copyright and permission notice.\n"
+    notice.write_text(text, encoding="utf-8")
+    before = notice.read_bytes()
+    with pytest.raises(CrabError, match="did not write or was edited"):
+        _prepare(maw)
+    assert main(["attribution", "--maw", str(maw)]) == 1
+    assert main(["attribution", "--maw", str(maw), "--allow-remove"]) == 1
+    assert notice.read_bytes() == before
+    # A separate generated path leaves the contributor's index intact.
+    prepared = _prepare(maw, attribution_file="CRAB_NOTICES.md")
+    assert "THIRD_PARTY_NOTICES.md" not in {item.path for item in prepared.files}
+    assert notice.read_bytes() == before
+
+
+@pytest.mark.parametrize("receipts", [None, dump_attributions([_record()])])
+def test_fetched_unmanaged_notice_is_refused(tmp_path: Path, receipts: str | None) -> None:
+    prepared = _prepare(_maw(tmp_path))
+    base = {
+        ATTRIBUTIONS_PATH: receipts,
+        "THIRD_PARTY_NOTICES.md": "# Third-party notices\n\nPrior legal notice.\n",
+    }
+    with pytest.raises(CrabError, match="unmanaged or edited"):
+        base_receipts_kept(prepared)(base.get)
+
+
+def test_unmanaged_notice_refusal_precedes_provider_and_ledger_effects(tmp_path: Path) -> None:
+    maw = _maw(tmp_path)
+    notice = maw / "THIRD_PARTY_NOTICES.md"
+    original = b"# Third-party notices\n\nA human-maintained legal notice.\n"
+    notice.write_bytes(original)
+    config = MawConfig(root=maw)
+    config.serve.prs = "auto"
+    ledger = Ledger(None)
+    provider_calls: list[str] = []
+
+    def preparer(card: Candidate, payload: str) -> PreparedPullRequest:
+        return _prepare(maw, payload)
+
+    def publisher(
+        card: Candidate, prepared: PreparedPullRequest, allow_create: bool
+    ) -> PullRequestPublication:
+        provider_calls.append(card.id)
+        raise AssertionError("provider must not be reached")
+
+    card = _card()
+    with pytest.raises(CrabError, match="did not write or was edited"):
+        serve_cleanroom_pull_requests(
+            [card],
+            {card.id: _payload()},
+            config=config,
+            ledger=ledger,
+            explicit_selection=True,
+            preparer=preparer,
+            publisher=publisher,
+            now=NOW,
+        )
+    assert notice.read_bytes() == original
+    assert provider_calls == [] and ledger.entries == {}
+
+
+def test_fetched_receipt_content_cannot_change_under_the_same_identity(tmp_path: Path) -> None:
+    prepared = _prepare(_maw(tmp_path))
+    records = parse_attributions(
+        next(f.content for f in prepared.files if f.path == ATTRIBUTIONS_PATH)
+    )
+    previous = [replace(records[0], summary="Earlier notice that must survive")]
+    base = {
+        ATTRIBUTIONS_PATH: dump_attributions(previous),
+        "THIRD_PARTY_NOTICES.md": render_notices(previous),
+    }
+    with pytest.raises(CrabError, match="would drop receipts"):
+        base_receipts_kept(prepared)(base.get)
 
 
 def test_the_attribution_section_is_the_crabs_whatever_the_notes_say(tmp_path: Path) -> None:

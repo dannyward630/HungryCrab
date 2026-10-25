@@ -21,8 +21,12 @@ env:
 
 jobs:
   acquisition-quota:
-    name: Hard acquisition quota (Linux)
-    runs-on: ubuntu-latest
+    name: Hard acquisition quota (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -43,7 +47,7 @@ jobs:
         if: always() && steps.volume.outputs.root != ''
         env:
           CRAB_QUOTA_ROOT: ${{ steps.volume.outputs.root }}
-        run: uv run python scripts/acquisition_volume.py cleanup "$CRAB_QUOTA_ROOT"
+        run: uv run python scripts/acquisition_volume.py cleanup
   lint:
     name: Lint and type-check
     runs-on: ubuntu-latest

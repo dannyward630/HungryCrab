@@ -37,7 +37,7 @@ full JSON survives an enforced reading budget.
 
 GitHub's repository `size` must fit `--max-repo-kb` (307200 by default) before cloning.
 This remains an estimate. Remote acquisition additionally requires `--acquisition-volume`,
-a dedicated Linux block-device filesystem whose **backing-device capacity** fits `--max-acquisition-disk-bytes`
+a dedicated Linux block-device filesystem or Windows volume whose **kernel capacity** fits `--max-acquisition-disk-bytes`
 (1 GiB by default). Put `--cache-dir` inside that volume. The kernel bounds all Git objects,
 checkout files, staging, temporary files and filesystem metadata together, including old caches
 retained during replacement. A directory on a larger disk, a free-space check or a size sampler
@@ -54,9 +54,10 @@ wire traffic are not metered. Provider REST requests retain their separate respo
 SSH, local Git transports and redirects are refused for remote budgeted acquisition, and inherited
 proxy bypasses and Git object/temp path overrides are cleared. There is no unmetered fallback.
 
-The hard acquisition adapter currently supports Linux block-device mounts with process-group cancellation;
-other hosts fail closed for remote Feeder acquisition. Local, already acquired repository paths
-remain usable on Windows with `--no-wiki`. Each prey's acquisition transaction stages its
+The hard acquisition adapter supports Linux process groups and native Windows Job Objects;
+see [bounded local acquisition](acquisition.md) for volume/VHD prerequisites, host headroom,
+contention and recovery. Other unsupported hosts fail closed. Local, already acquired paths
+also remain usable without remote acquisition. Each prey's acquisition transaction stages its
 provider preflight/API/HTTP metadata, main repository, prey wiki and requested maw wiki before
 publishing any of them. Download/disk exhaustion or handled cancellation preserves the previous
 complete cache; cancellation during publication rolls back earlier cache moves. Unrelated digest

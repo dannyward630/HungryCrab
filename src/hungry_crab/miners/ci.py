@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -14,6 +15,7 @@ from ..mdutil import MdDoc
 from ..safety import safe_name
 from ..typeutil import as_dict, as_list
 from .base import MineContext, MinerResult
+from .ci_tools import TEST_TOOLS
 
 WORKFLOW_DIR = ".github/workflows/"
 _ACTION_RE = re.compile(r"^(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[^@\s]+)?@(?P<ref>\S+)$")
@@ -87,6 +89,17 @@ TOOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ),
         ("tox", r"\btox\b"),
         ("nox", r"\bnox\b"),
+        ("make test", r"(?:^|[;&|\n])\s*make\s+test(?=\s|$)"),
+        ("just test", r"(?:^|[;&|\n])\s*just\s+test(?=\s|$)"),
+        ("task test", r"(?:^|[;&|\n])\s*task\s+test(?=\s|$)"),
+        ("make lint", r"(?:^|[;&|\n])\s*make\s+lint(?=\s|$)"),
+        ("just lint", r"(?:^|[;&|\n])\s*just\s+lint(?=\s|$)"),
+        ("task lint", r"(?:^|[;&|\n])\s*task\s+lint(?=\s|$)"),
+        ("make check", r"(?:^|[;&|\n])\s*make\s+check(?=\s|$)"),
+        ("just check", r"(?:^|[;&|\n])\s*just\s+check(?=\s|$)"),
+        ("task check", r"(?:^|[;&|\n])\s*task\s+check(?=\s|$)"),
+        ("cargo nextest", r"\bcargo\s+nextest\s+run\b"),
+        ("rake test", r"(?:^|[;&|\n])\s*bundle\s+exec\s+rake(?:\s+test)?(?=\s|$)"),
         ("uv", r"\buv (?:sync|run|pip|lock|build|publish)\b"),
         ("eslint", r"\beslint\b"),
         ("prettier", r"\bprettier\b"),
@@ -401,7 +414,40 @@ def load_prey_yaml(text: str) -> object:
         loader.dispose()
 
 
-def parse_workflow(text: str, path: str) -> dict[str, Any] | None:
+def _script_commands(run: str, scripts: Mapping[str, str]) -> tuple[list[str], list[str]]:
+    """Resolve bounded root package-script references as inert metadata, never a shell."""
+    pattern = re.compile(
+        r"(?:^|[;&|\n])\s*(?:npm\s+run\s+|(?:pnpm|yarn)\s+(?:run\s+)?|bun\s+run\s+)"
+        r"([A-Za-z0-9:_-]+)(?=\s|$)"
+    )
+    commands: list[str] = []
+    unknown: set[str] = set()
+    pending: list[tuple[str, frozenset[str]]] = [(run, frozenset())]
+    remaining = 16_384
+    while pending and len(commands) < 64:
+        command, ancestors = pending.pop()
+        if len(command) > remaining:
+            unknown.add("script expansion exceeds byte budget")
+            break
+        remaining -= len(command)
+        commands.append(command)
+        for match in pattern.finditer(command):
+            name = match.group(1)
+            body = scripts.get(name)
+            if name in ancestors or len(ancestors) >= 8:
+                unknown.add(f"cyclic or deep package script: {name}")
+            elif body is None:
+                unknown.add(f"unresolved package script: {name}")
+            else:
+                pending.append((body, ancestors | {name}))
+    if pending:
+        unknown.add("script expansion exceeds command budget")
+    return commands, sorted(unknown)
+
+
+def parse_workflow(
+    text: str, path: str, *, scripts: Mapping[str, str] | None = None
+) -> dict[str, Any] | None:
     loaded = load_prey_yaml(text)
     if not isinstance(loaded, dict):
         return None
@@ -411,6 +457,7 @@ def parse_workflow(text: str, path: str) -> dict[str, Any] | None:
     jobs: list[dict[str, Any]] = []
     actions: list[dict[str, Any]] = []
     tools: set[str] = set()
+    unresolved_scripts: set[str] = set()
     coverage_flags: set[str] = set()
     coverage_upload: str | None = None
     cache = False
@@ -470,9 +517,29 @@ def parse_workflow(text: str, path: str) -> dict[str, Any] | None:
                 run = step.get("run")
                 if isinstance(run, str):
                     step_runs += 1
-                    for name, pattern in TOOL_PATTERNS:
-                        if pattern.search(run):
-                            tools.add(name)
+                    directory = step.get(
+                        "working-directory", as_dict(job.get("defaults")).get("run", {})
+                    )
+                    default_directory = as_dict(as_dict(loaded.get("defaults")).get("run")).get(
+                        "working-directory", "."
+                    )
+                    if isinstance(directory, dict):
+                        directory = directory.get("working-directory", default_directory)
+                    commands, unresolved = _script_commands(
+                        run, scripts or {} if directory in (".", "./", "") else {}
+                    )
+                    unresolved_scripts.update(unresolved)
+                    step_tools: set[str] = set()
+                    for command in commands:
+                        for name, pattern in TOOL_PATTERNS:
+                            if pattern.search(command):
+                                step_tools.add(name)
+                    if "npm test" in step_tools and not step_tools & (TEST_TOOLS - {"npm test"}):
+                        step_tools.remove("npm test")
+                        unresolved_scripts.add(
+                            "package test entrypoint has no established test tool"
+                        )
+                    tools.update(step_tools)
                     for name, pattern in COVERAGE_FLAGS:
                         if pattern.search(run):
                             coverage_flags.add(name)
@@ -530,6 +597,7 @@ def parse_workflow(text: str, path: str) -> dict[str, Any] | None:
         "jobs": jobs,
         "actions": actions,
         "tools": sorted(tools),
+        "unresolved_scripts": sorted(unresolved_scripts),
         "coverage": {"flags": sorted(coverage_flags), "upload": coverage_upload},
         "cache": cache,
         "matrix": any(j["matrix"] for j in jobs),
@@ -570,7 +638,7 @@ def _parse_dependabot(text: str) -> dict[str, Any] | None:
 
 class CiMiner:
     name = "ci"
-    requires: tuple[str, ...] = ("inventory",)
+    requires: tuple[str, ...] = ("inventory", "deps")
     json_file = "ci.json"
     md_file = "ci.md"
 
@@ -585,7 +653,9 @@ class CiMiner:
                 continue
             text = ctx.read(info.path, limit=262_144)
             try:
-                parsed = parse_workflow(text, info.path)
+                parsed = parse_workflow(
+                    text, info.path, scripts=ctx.data("deps").get("npm_scripts", {})
+                )
             except (yaml.YAMLError, RecursionError, MemoryError) as exc:
                 # Hostile nesting exhausts the parser's stack, not its grammar (#330).
                 warnings.append(f"{info.path}: YAML error ({type(exc).__name__})")

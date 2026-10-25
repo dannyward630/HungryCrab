@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ..errors import CrabError, UsageError
+from ..file_lock import state_lock
 from .bounded import run_bounded
 
 CURRENT: contextvars.ContextVar[AcquisitionBudget | None] = contextvars.ContextVar(
@@ -54,6 +55,10 @@ def volume_capacity(volume: Path) -> int:
                 hint="provide a dedicated Linux block-device filesystem, such as the fixed-size "
                 "loop image provisioned by the Feeder action",
             ) from exc
+    elif sys.platform == "win32":
+        from .windows_boundary import volume_capacity as windows_capacity
+
+        return windows_capacity(volume)
     else:
         raise UsageError(
             "hard acquisition capacity verification requires a Linux block-device mount"
@@ -89,6 +94,14 @@ class AcquisitionBudget:
                 "an ordinary directory or free-space check is not a hard quota",
             )
         self.capacity = capacity
+        if sys.platform == "win32":
+            # Check assignment/resumption under the actual host's enclosing job
+            # policy before any provider or Git network operation can begin.
+            result = self.run_git(
+                [sys.executable, "-I", "-S", "-B", "-c", "pass"], self.volume, dict(os.environ), 10
+            )
+            if result.returncode:
+                raise UsageError("Windows acquisition process-tree preflight failed")
 
     def require_path(self, path: Path) -> None:
         resolved = path.resolve()
@@ -188,7 +201,7 @@ class AcquisitionBudget:
     def run_git(
         self, command: list[str], cwd: Path, env: dict[str, str], timeout: float
     ) -> subprocess.CompletedProcess[bytes]:
-        if os.name != "posix":
+        if os.name != "posix" and sys.platform != "win32":
             raise UsageError(
                 "hard acquisition requires a POSIX runner with process-group cancellation",
                 hint="use the Linux Feeder job; other runners fail closed until a verified "
@@ -259,6 +272,13 @@ class AcquisitionBudget:
 
     @contextmanager
     def scope(self) -> Iterator[AcquisitionBudget]:
+        # One writer owns this finite domain until staging publication/cleanup
+        # finishes. Concurrent attempts fail before opening a network connection.
+        with state_lock(self.volume / ".crab-acquisition-state.json"), self._scope() as budget:
+            yield budget
+
+    @contextmanager
+    def _scope(self) -> Iterator[AcquisitionBudget]:
         budget = self
 
         class Relay(socketserver.BaseRequestHandler):

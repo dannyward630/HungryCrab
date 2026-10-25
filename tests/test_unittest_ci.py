@@ -85,7 +85,7 @@ def test_same_version_ci_detection_cache_is_remined(npm_app: Path, tmp_path: Pat
     first = run_digest(Target(path=npm_app), options)
     manifest_path = first.manifest_path
     old = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert old["analysis_identity"]["ci_tool_detection"] == "unittest-v1"
+    assert old["analysis_identity"]["ci_tool_detection"] == "shared-scripts-v3"
     del old["analysis_identity"]["ci_tool_detection"]
     manifest_path.write_text(json.dumps(old), encoding="utf-8")
     refreshed = run_digest(Target(path=npm_app), DigestOptions(**options.__dict__))

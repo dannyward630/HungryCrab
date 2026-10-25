@@ -6,8 +6,9 @@ It is development functionality, not a release announcement.
 The optional tree-sitter syntax index this milestone also planned (declarations, a lexical call
 graph and the first `code` cards) was postponed on 2026-10-22: native parsers reading hostile
 prey, ten more packages to keep in step and digests that differ by environment outweighed what
-it added. It comes back when a real evidence gap asks for it; until then `code` is a deferred
-category and the runtime dependency is PyYAML alone.
+it added. The syntax index remains optional; `code` now has the bounded source-linked
+registration producer described in [supervised discovery](discovery.md), without a parser dependency.
+The base runtime dependency remains PyYAML alone.
 
 ## Install and use
 

@@ -69,24 +69,42 @@ def run_bounded(
     """
     if not command:
         raise ValueError("API transport command must not be empty")
-    if process_group and sys.platform == "win32":
-        raise ValueError("process-group cancellation requires a POSIX runner")
     validate_timeout(timeout)
     for limit in (stdout_limit, stderr_limit):
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise ValueError("response byte limit must be a positive integer")
 
     deadline = time.monotonic() + timeout
-    proc = subprocess.Popen(
-        list(command),
-        stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=0,
-        env=env,
-        cwd=cwd,
-        start_new_session=process_group,
-    )
+    from .windows_boundary import CREATE_SUSPENDED, WindowsJob
+
+    job = WindowsJob() if process_group and sys.platform == "win32" else None
+    try:
+        proc = subprocess.Popen(
+            list(command),
+            stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,
+            env=env,
+            cwd=cwd,
+            start_new_session=process_group and sys.platform != "win32",
+            creationflags=CREATE_SUSPENDED if job is not None else 0,
+        )
+    except BaseException:
+        if job is not None:
+            job.close()
+        raise
+    if job is not None:
+        try:
+            job.assign_and_resume(proc)
+        except BaseException:
+            job.close()
+            proc.kill()
+            proc.wait(timeout=5)
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
+            raise
     assert proc.stdout is not None and proc.stderr is not None
     streams = (proc.stdout, proc.stderr)
     results: list[bytes | None] = [None, None]
@@ -178,6 +196,8 @@ def run_bounded(
         return subprocess.CompletedProcess(list(command), proc.wait(timeout=1), stdout, stderr)
     finally:
         stopped.set()
+        if job is not None:
+            job.close()
         if process_group and sys.platform != "win32":
             with suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)

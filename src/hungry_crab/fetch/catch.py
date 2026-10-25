@@ -15,7 +15,7 @@ import stat
 import sys
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from ..cache import cache_root as default_cache_root
 from ..errors import CrabError, ExternalCommandError, UsageError
 from ..fs import is_reparse_point
 from . import channels
-from .acquisition import CURRENT, AcquisitionLimitError
+from .acquisition import CURRENT, AcquisitionBudget, AcquisitionLimitError
 from .cache_identity import (
     CLONE_RECORD,
     atomic_cache_text,
@@ -66,6 +66,9 @@ class CatchOptions:
     discussions: int = 0
     reviews: int = 0
     runs: int = 0
+    acquisition_volume: Path | None = None
+    max_download_bytes: int = 300 * 1024 * 1024
+    max_disk_bytes: int = 1024 * 1024 * 1024
 
 
 @dataclass
@@ -294,6 +297,23 @@ def catch(
     """
     opts = options or CatchOptions()
     budget = CURRENT.get()
+    if opts.acquisition_volume is not None and budget is None:
+        root = cache_root if cache_root is not None else opts.acquisition_volume / "cache"
+        boundary = AcquisitionBudget(
+            opts.acquisition_volume, root, opts.max_download_bytes, opts.max_disk_bytes
+        )
+        with boundary.scope():
+            return catch(
+                slug,
+                replace(opts, acquisition_volume=None),
+                cache_root=root,
+                source_url=source_url,
+                log=log,
+                now=now,
+                github=github,
+                wiki_source_url=wiki_source_url,
+                channels_only=channels_only,
+            )
     if budget is not None and not channels_only and not budget.staging:
         return _budgeted_catch(
             slug,

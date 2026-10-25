@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..digest import failed_miners
-from ..fs import is_link_stat, read_text
+from ..digest import failed_miners, worktree_fingerprint
+from ..errors import CrabError
+from ..fetch.bounded import run_bounded
+from ..fetch.git import SAFE_CONFIG, GitRunner, git_env, git_executable
+from ..fs import is_ignored, is_link_stat, read_text
 from ..licensing.origin import ContentOrigin
+from ..miners.ci_tools import LINT_TOOLS, TEST_TOOLS
+from ..miners.inventory import BUILD_OUTPUT_DIRS, CORPUS_DIRS, VENDORED_DIRS
 from ..nutrients import Candidate, Evidence, slugify
 from ..safety import is_suspicious
 from ..typeutil import as_dict, as_list
@@ -52,6 +59,7 @@ PACKAGE_IMPLEMENTS_KEY: dict[str, str] = {
 }
 
 _DIGEST_FILES = {
+    "inventory": "inventory.json",
     "traits": "traits.json",
     "deps": "deps.json",
     "history": "history.json",
@@ -97,17 +105,42 @@ class Side:
     architecture: dict[str, Any] = field(default_factory=dict)
     signals: dict[str, Any] = field(default_factory=dict)
     manifest: dict[str, Any] = field(default_factory=dict)
+    inventory: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, digest_dir: Path, *, root: Path | None = None) -> Side:
+    def load(
+        cls, digest_dir: Path, *, root: Path | None = None, objects: Path | None = None
+    ) -> Side:
         data = {name: _load(digest_dir / file_name) for name, file_name in _DIGEST_FILES.items()}
         manifest = data["manifest"]
         prey = as_dict(manifest.get("prey"))
         traits = as_dict(data["traits"].get("traits"))
         recorded_root = prey.get("root")
+        if objects is not None:
+            paths = _snapshot_files(objects, str(prey.get("sha", "")), manifest)
+            existing = data["inventory"].get("evidence_files")
+            if isinstance(existing, list) and not set(existing) <= set(paths):
+                raise CrabError(
+                    "digest file evidence is inconsistent with the immutable Git snapshot"
+                )
+            data["inventory"]["evidence_files"] = paths if existing is None else existing
+            data["inventory"]["evidence_source"] = "git-snapshot"
         side_root = root
         if side_root is None and isinstance(recorded_root, str) and Path(recorded_root).is_dir():
             side_root = Path(recorded_root)
+        if side_root is not None:
+            git = GitRunner(side_root)
+            top = git.try_run("rev-parse", "--show-toplevel")
+            sha = git.try_run("--no-replace-objects", "rev-parse", "HEAD")
+            if (
+                not top
+                or Path(top.strip()).resolve() != side_root.resolve()
+                or not sha
+                or sha.strip() != prey.get("sha")
+                or prey.get("worktree") not in {"clean", ""}
+                or worktree_fingerprint(git, side_root) != "clean"
+            ):
+                side_root = None
         return cls(
             label=str(prey.get("label") or digest_dir.parent.name),
             sha=str(prey.get("sha") or ""),
@@ -125,6 +158,7 @@ class Side:
             architecture=data["architecture"],
             signals=data["signals"],
             manifest=manifest,
+            inventory=data["inventory"],
         )
 
     @property
@@ -146,6 +180,10 @@ class Side:
         return {str(e) for e in as_list(self.traits.get("ecosystems"))}
 
     @property
+    def compatible_ecosystems(self) -> set[str]:
+        return self.ecosystems | {str(e) for e in as_list(self.traits.get("runtime_ecosystems"))}
+
+    @property
     def spdx(self) -> str | None:
         value = self.license.get("spdx")
         return value if isinstance(value, str) else None
@@ -164,6 +202,10 @@ class Side:
 
     def find_files(self, pattern: str, *, limit: int = 3) -> list[str]:
         """Existing files in the working tree matching a glob, POSIX-relative."""
+        inventory = self.inventory.get("evidence_files")
+        if isinstance(inventory, list):
+            paths = sorted({p for p in inventory if isinstance(p, str) and _evidence_path(p)})
+            return [p for p in paths if _match_evidence_path(p, pattern)][:limit]
         if self.root is None:
             return []
         root = self.root
@@ -174,6 +216,95 @@ class Side:
         except (OSError, ValueError):
             return []
         return [p.relative_to(root).as_posix() for p in matches[:limit]]
+
+    @property
+    def evidence_capability(self) -> str:
+        if isinstance(self.inventory.get("evidence_files"), list):
+            source = str(self.inventory.get("evidence_source", "inventory"))
+            return (
+                source
+                if as_dict(self.inventory.get("coverage")).get("healthy") is True
+                else f"partial-{source}"
+            )
+        return "verified-working-tree" if self.root is not None else "unavailable"
+
+
+def _evidence_path(path: str) -> bool:
+    return bool(path) and not any(
+        part in {"", ".", "..", ".git"}
+        or ":" in part
+        or "\\" in part
+        or any(ord(c) < 32 for c in part)
+        for part in path.split("/")
+    )
+
+
+def _match_evidence_path(path: str, pattern: str) -> bool:
+    # POSIX component semantics on every runner, including zero-directory '**'.
+    parts, patterns = path.split("/"), pattern.split("/")
+    pending = [(0, 0)]
+    seen: set[tuple[int, int]] = set()
+    while pending:
+        pi, si = pending.pop()
+        if (pi, si) in seen:
+            continue
+        seen.add((pi, si))
+        if pi == len(patterns):
+            if si == len(parts):
+                return True
+            continue
+        if patterns[pi] == "**":
+            pending.append((pi + 1, si))
+            if si < len(parts):
+                pending.append((pi, si + 1))
+        elif si < len(parts) and fnmatch.fnmatchcase(parts[si], patterns[pi]):
+            pending.append((pi + 1, si + 1))
+    return False
+
+
+def _snapshot_files(objects: Path, sha: str, manifest: dict[str, Any]) -> list[str]:
+    """Resolve regular files from an explicit immutable object store without a checkout."""
+    if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha):
+        raise CrabError("Git snapshot evidence requires a full immutable commit SHA")
+    if as_dict(manifest.get("prey")).get("worktree") not in {None, "", "clean"}:
+        raise CrabError("Git snapshot cannot establish evidence for a dirty working-tree digest")
+    kind = run_bounded(
+        [git_executable(), *SAFE_CONFIG, "--no-replace-objects", "cat-file", "-t", sha],
+        cwd=str(objects),
+        env=git_env(),
+        timeout=30,
+    )
+    if kind.returncode or kind.stdout.strip() != b"commit":
+        raise CrabError("immutable commit is unavailable in the selected Git object store")
+    command = [
+        git_executable(),
+        *SAFE_CONFIG,
+        "--no-replace-objects",
+        "ls-tree",
+        "-rz",
+        "--full-tree",
+        sha,
+    ]
+    result = run_bounded(command, cwd=str(objects), env=git_env(), timeout=30)
+    if result.returncode:
+        raise CrabError("immutable commit is unavailable in the selected Git object store")
+    paths: list[str] = []
+    ignores = [str(p) for p in as_list(manifest.get("ignore"))]
+    for entry in result.stdout.decode("utf-8", errors="replace").split("\0"):
+        meta, _, path = entry.partition("\t")
+        if (
+            meta.startswith(("100644 blob ", "100755 blob "))
+            and _evidence_path(path)
+            and not is_ignored(path, ignores)
+            and not any(
+                part in VENDORED_DIRS | BUILD_OUTPUT_DIRS | CORPUS_DIRS
+                for part in path.split("/")[:-1]
+            )
+        ):
+            paths.append(path)
+        if len(paths) > 120_000:
+            raise CrabError("Git snapshot file inventory exceeds the supported budget")
+    return sorted(paths)
 
 
 def _within_own_tree(root: Path, path: Path) -> bool:
@@ -272,18 +403,9 @@ def _workflow_has(wf: dict[str, Any], feature: str) -> bool:
             for a in actions
         )
     if feature == "tests":
-        return bool(
-            tools
-            & {"pytest", "vitest", "jest", "mocha", "playwright", "cypress", "npm test",
-               "dotnet test", "cargo test", "go test", "tox", "nox"}
-        )  # fmt: skip
+        return bool(tools & TEST_TOOLS)
     if feature == "lint":
-        return bool(
-            tools
-            & {"ruff", "black", "flake8", "isort", "mypy", "pyright", "eslint", "prettier",
-               "biome", "tsc", "dotnet format", "cargo clippy", "cargo fmt", "go vet",
-               "golangci-lint", "pre-commit"}
-        )  # fmt: skip
+        return bool(tools & LINT_TOOLS)
     return False
 
 
@@ -298,7 +420,7 @@ def _rule_evidence(rule: TraitRule, prey: Side) -> list[Evidence]:
 def uptake_kind(prey: Side, maw: Side, *, stack_bound: bool) -> str:
     if not stack_bound:
         return "same_stack"
-    return "same_stack" if prey.ecosystems & maw.ecosystems else "other_stack"
+    return "same_stack" if prey.compatible_ecosystems & maw.compatible_ecosystems else "other_stack"
 
 
 def trait_rule_candidates(prey: Side, maw: Side) -> list[Candidate]:
@@ -306,6 +428,8 @@ def trait_rule_candidates(prey: Side, maw: Side) -> list[Candidate]:
     for rule in TRAIT_RULES:
         prey_value = prey.trait(rule.trait)
         maw_value = maw.trait(rule.trait)
+        if rule.trait in {"ci_runs_tests", "ci_runs_lint"} and maw_value is None:
+            continue  # Unresolved script evidence is unknown, not a proven missing step.
         if rule.key == "docs.directory":
             # Preserve the stable nutrient id while treating a wiki as documentation too.
             prey_value = prey_value or prey.trait("has_wiki")
@@ -314,7 +438,7 @@ def trait_rule_candidates(prey: Side, maw: Side) -> list[Candidate]:
             continue
         if any(not _truthy(maw.trait(name)) for name in rule.needs_maw):
             continue
-        if rule.stack_bound and not (prey.ecosystems & maw.ecosystems):
+        if rule.stack_bound and not (prey.compatible_ecosystems & maw.compatible_ecosystems):
             continue
         out.append(
             Candidate(
@@ -362,7 +486,7 @@ def tool_candidates(prey: Side, maw: Side) -> list[Candidate]:
             continue
         for tool in sorted(prey_tools):
             ecosystem = TOOL_ECOSYSTEM.get(tool)
-            if ecosystem is None or ecosystem not in maw.ecosystems:
+            if ecosystem is None or ecosystem not in maw.compatible_ecosystems:
                 continue
             out.append(
                 Candidate(
@@ -431,7 +555,7 @@ def tool_candidates(prey: Side, maw: Side) -> list[Candidate]:
     for trait, (ecosystem, key, title) in pins.items():
         if not _truthy(prey.trait(trait)) or _truthy(maw.trait(trait)):
             continue
-        if ecosystem != "*" and ecosystem not in maw.ecosystems:
+        if ecosystem != "*" and ecosystem not in maw.compatible_ecosystems:
             continue
         out.append(
             Candidate(
@@ -548,7 +672,7 @@ def test_candidates(prey: Side, maw: Side) -> list[Candidate]:
     if not _truthy(maw.trait("has_tests")):
         return out
     frameworks = as_dict(prey.testing.get("frameworks"))
-    same_stack = bool(prey.ecosystems & maw.ecosystems)
+    same_stack = bool(prey.compatible_ecosystems & maw.compatible_ecosystems)
     for trait, (kind, effort, title) in TEST_KIND_TRAITS.items():
         if not _truthy(prey.trait(trait)) or _truthy(maw.trait(trait)):
             continue
@@ -830,16 +954,15 @@ def issue_candidates(prey: Side, maw: Side) -> list[Candidate]:
     strong.sort(key=lambda c: (-int(c["size"]), -int(c.get("reactions") or 0)))
     for index, data in enumerate(strong[:MAX_ISSUE_CLUSTERS], start=1):
         size = int(data["size"])
-        terms = ", ".join(str(t) for t in as_list(data.get("terms"))[:5])
-        samples = [str(t) for t in as_list(data.get("sample_titles")) if str(t).strip()]
-        headline = samples[0][:70] if samples else terms
+        numbers = [n for n in as_list(data.get("numbers")) if type(n) is int and n > 0][:20]
         out.append(
             Candidate(
                 category="issue-lesson",
                 origin=ContentOrigin.COMMENTERS.value,
                 key=f"issue-lesson.{slug}.cluster-{index}",
-                title=f"Recurring pain in {prey.label}: {headline}",
-                what=f"{size} issues cluster around {terms}; the largest is: {headline}",
+                trace={"issue_facts": {"size": size, "reactions": data.get("reactions", 0)}},
+                title=f"Recurring issue theme {index} in {slug}",
+                what=f"{size} issues in cluster {index}",
                 prey_state=f"{size} issues, {data.get('reactions') or 0} reactions",
                 maw_state="n/a (lesson, not a gap)",
                 serve_as="idea",
@@ -847,6 +970,10 @@ def issue_candidates(prey: Side, maw: Side) -> list[Candidate]:
                 risk="low",
                 value=0.5,
                 tags=["issues"],
+                evidence=[
+                    Evidence(path=f"issue #{n}", url=f"{prey.url}/issues/{n}" if prey.url else None)
+                    for n in numbers
+                ],
             )
         )
     for top in as_list(prey.issues.get("top_by_reactions"))[:MAX_TOP_ISSUES]:
@@ -856,11 +983,14 @@ def issue_candidates(prey: Side, maw: Side) -> list[Candidate]:
         if not isinstance(reactions, int) or reactions < 20 or is_suspicious(title):
             continue
         number = data.get("number")
+        if type(number) is not int or number <= 0:
+            continue
         out.append(
             Candidate(
                 category="issue-lesson",
                 origin=ContentOrigin.COMMENTERS.value,
                 key=f"issue-lesson.{slug}.top-{number}",
+                trace={"issue_facts": {"size": 1, "reactions": reactions}},
                 title=f"Popular request in {prey.label}: {title[:80]}",
                 what=f"issue #{number} has {reactions} reactions",
                 prey_state=f"{reactions} reactions",

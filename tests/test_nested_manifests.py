@@ -33,6 +33,7 @@ DEEP_YAML = "a: " + "[" * 5_000
 def _context(root: Path) -> MineContext:
     ctx = MineContext(root=root, sha="a" * 40, ref="fixture", label="fixture")
     ctx.results["inventory"] = InventoryMiner().run(ctx)
+    ctx.results["deps"] = ProjectDepsMiner().run(ctx)
     return ctx
 
 

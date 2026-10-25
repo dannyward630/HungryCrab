@@ -1,0 +1,816 @@
+{
+  "schema": "scope-453-public-replay/1",
+  "original_judgements_sha256": "59df04fbe9f27874e83f743d7f37a86d3a647fd0e4cc535612b1d03088287e4b",
+  "original_judgements_unchanged": true,
+  "pairs": [
+    {
+      "maw": "crab",
+      "repo": "yamadashy/repomix",
+      "donor_sha": "5f4923b92a6289cb6497666c6945e95752a1df90",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "2ea30c12e1754d0fffce7b22866dde8794253b86798ea6fa435d1235bd5a4963",
+      "disposition": "not-useful",
+      "hypothesis": "Check byte limits after reading the entire file",
+      "reason": "The donor intentionally reads the complete buffer before checking maxFileSize. Crab must stop before unbounded buffering; its bounded reader reads one sentinel byte beyond a cap. Adopting this optimization would weaken the receiving safety contract.",
+      "source_evidence": [
+        {
+          "sha": "5f4923b92a6289cb6497666c6945e95752a1df90",
+          "path": "src/core/file/fileRead.ts",
+          "start": 70,
+          "end": 99
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/fetch/bounded.py",
+          "start": 31,
+          "end": 47
+        }
+      ],
+      "denominator": 14,
+      "unreviewed_count": 14,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "coderamp-labs/gitingest",
+      "donor_sha": "4e259a02fe72115bee538271622f1234a81c8e1a",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "64ca913c82b8e06b24439fab4f8f354d5025c7e78ea94e61f66afeb446a42041",
+      "disposition": "out-of-scope",
+      "hypothesis": "Automatically probe remote providers and interpret URL subpaths",
+      "reason": "The source resolves ambiguous provider slugs and branch/subpath URLs. Crab accepts an explicit supported forge identity and pins whole-repository evidence. Automatic provider probing and subpath reinterpretation add network effects outside this flow; this does not reject its other parsing ideas.",
+      "source_evidence": [
+        {
+          "sha": "4e259a02fe72115bee538271622f1234a81c8e1a",
+          "path": "src/gitingest/query_parser.py",
+          "start": 25,
+          "end": 36
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/cache.py",
+          "start": 78,
+          "end": 112
+        }
+      ],
+      "denominator": 10,
+      "unreviewed_count": 10,
+      "pending_facets": [
+        "recovery-resources-concurrency"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "tox-dev/tox",
+      "donor_sha": "d7ea3f58aa47ac60e56ff8b61ad90be5c947f345",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "0bbe0fe4385b08b2a5a2ef96bd46cc74c9e4c2b4cb08080bedbd021e7a8a0f29",
+      "disposition": "NO_GAP",
+      "hypothesis": "Bound cancellation of trusted child processes",
+      "reason": "The inspected tox path escalates INT/TERM/KILL and waits. Crab already has a finite deadline, captured-byte limits, POSIX process groups and suspended assignment to a Windows kill-on-close Job Object. This no-gap conclusion covers trusted acquisition cancellation only; it does not claim all tox operations were reviewed.",
+      "source_evidence": [
+        {
+          "sha": "d7ea3f58aa47ac60e56ff8b61ad90be5c947f345",
+          "path": "src/tox/execute/local_sub_process/__init__.py",
+          "start": 77,
+          "end": 110
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/fetch/bounded.py",
+          "start": 49,
+          "end": 110
+        }
+      ],
+      "denominator": 5,
+      "unreviewed_count": 5,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "Textualize/rich",
+      "donor_sha": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "0af1276f755c83d9a45591c245ee385b96649752cfa5ce5693f5394feef77524",
+      "disposition": "NO_GAP",
+      "hypothesis": "Keep machine JSON free of terminal decoration",
+      "reason": "Rich tests explicitly exercise ANSI-decorated JSON. Crab already serializes JSON directly and sends progress to stderr. Adding decorated JSON would break machine consumers; terminal UX beyond this narrow output contract remains unexamined.",
+      "source_evidence": [
+        {
+          "sha": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+          "path": "tests/test_console.py",
+          "start": 219,
+          "end": 248
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/cli.py",
+          "start": 751,
+          "end": 786
+        }
+      ],
+      "denominator": 8,
+      "unreviewed_count": 8,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "fastapi/typer",
+      "donor_sha": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "d0c7cb4034919d91968c930deb29cbe689ad31c29b501513d60ecbc28e4e2604",
+      "disposition": "NO_GAP",
+      "hypothesis": "Expose descriptive help for every public parser argument",
+      "reason": "Typer builds argument help records. Crab now recursively checks all public argparse commands, positional arguments and options for nonempty help. The receiving regression covers this specific omission without a framework migration; completion and rich panels were not evaluated.",
+      "source_evidence": [
+        {
+          "sha": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+          "path": "typer/core.py",
+          "start": 327,
+          "end": 338
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "tests/test_cli_help.py",
+          "start": 8,
+          "end": 23
+        }
+      ],
+      "denominator": 9,
+      "unreviewed_count": 9,
+      "pending_facets": [
+        "documentation-contributors"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "python-jsonschema/jsonschema",
+      "donor_sha": "c497561ea0a95f5aac09cd63d15eb1420eb7bbec",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "528a576a836fee4d739792e872f4a5bb62152492ad05b44416eea0f24aebd6e5",
+      "disposition": "verified-gap",
+      "hypothesis": "Locate the exact invalid configuration key or element",
+      "reason": "The donor renders typed path components, including array indexes and escaped property names, and tests ambiguous names. Crab reports an entire scoring section for invalid values, without identifying the bad member. A small stdlib path formatter could improve diagnostics without adopting JSON Schema or changing policy validation.",
+      "source_evidence": [
+        {
+          "sha": "c497561ea0a95f5aac09cd63d15eb1420eb7bbec",
+          "path": "jsonschema/exceptions.py",
+          "start": 138,
+          "end": 171
+        },
+        {
+          "sha": "c497561ea0a95f5aac09cd63d15eb1420eb7bbec",
+          "path": "jsonschema/tests/test_exceptions.py",
+          "start": 1063,
+          "end": 1115
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/config_validation.py",
+          "start": 83,
+          "end": 103
+        }
+      ],
+      "denominator": 6,
+      "unreviewed_count": 6,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": "crab:code:code.config-error-location",
+      "registered_serve_as": "idea"
+    },
+    {
+      "maw": "crab",
+      "repo": "lark-parser/lark",
+      "donor_sha": "9a4fb9c7458e8155636773a3cded0016d52516da",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "d5f446f95eee7d74095e10a53c85de31a4c1a2e02dadae89da20255f25b778c3",
+      "disposition": "NO_GAP",
+      "hypothesis": "Detect cycles before recursively expanding an untrusted graph",
+      "reason": "Lark tracks active node identities during an explicit forest traversal. Crab already walks composed YAML nodes with an explicit stack and active-node set, rejects self-containing aliases, and charges expansion before constructing mappings. This covers the YAML alias flow, not a claim about arbitrary grammars.",
+      "source_evidence": [
+        {
+          "sha": "9a4fb9c7458e8155636773a3cded0016d52516da",
+          "path": "lark/parsers/earley_forest.py",
+          "start": 274,
+          "end": 310
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/miners/ci.py",
+          "start": 365,
+          "end": 395
+        }
+      ],
+      "denominator": 6,
+      "unreviewed_count": 6,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "python-jsonschema/referencing",
+      "donor_sha": "19ad61722eaec82086c37cd47ba4a801a5bd8c91",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "7287f2e3c7e2262f7cf86382c244fe357a8464afbb736b9b2123f1306350c01e",
+      "disposition": "NO_GAP",
+      "hypothesis": "Make remote resource retrieval opt in",
+      "reason": "The source default retriever refuses unknown resources. Crab MCP similarly refuses remote acquisition when allow_network is false. No automatic URI retrieval should be added to scoped local analysis; registry internals and cache optimization remain unexamined.",
+      "source_evidence": [
+        {
+          "sha": "19ad61722eaec82086c37cd47ba4a801a5bd8c91",
+          "path": "referencing/_core.py",
+          "start": 288,
+          "end": 313
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/mcp_service.py",
+          "start": 236,
+          "end": 245
+        }
+      ],
+      "denominator": 6,
+      "unreviewed_count": 6,
+      "pending_facets": [
+        "recovery-resources-concurrency"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "cli/cli",
+      "donor_sha": "4f2cfe92e3499f8581bf39db77e0a1431fa7b55c",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "87d9fd39a3e426d58cd289499d12c78a6b00889193388ce253fd388ea9475dda",
+      "disposition": "out-of-scope",
+      "hypothesis": "Add embedded jq and template selection to JSON output",
+      "reason": "GitHub CLI exposes JSON field selection, jq and templates. Crab already emits complete deterministic menu JSON for external processors. Embedding an expression engine adds runtime and maintenance obligations without a demonstrated receiving flow requiring it. Plain JSON serialization is already present; query-language UX is a separate proposal.",
+      "source_evidence": [
+        {
+          "sha": "4f2cfe92e3499f8581bf39db77e0a1431fa7b55c",
+          "path": "pkg/cmdutil/json_flags.go",
+          "start": 26,
+          "end": 46
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/cli.py",
+          "start": 751,
+          "end": 786
+        }
+      ],
+      "denominator": 5,
+      "unreviewed_count": 5,
+      "pending_facets": [
+        "recovery-resources-concurrency"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "crab",
+      "repo": "vale-cli/vale",
+      "donor_sha": "8b9bfb97700a707140fff9f444048439df5bc9b1",
+      "receiver_sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+      "snapshot": "0366a9da6a30af28b5112654ab71b3f9cbdb258f877b27dbd69e8e7fd99c00a3",
+      "disposition": "out-of-scope",
+      "hypothesis": "Run prose-format helpers while inspecting a repository",
+      "reason": "The inspected linter path invokes format-specific helpers and closes them afterward. Crab inventory is an inert structural walk and never runs prey programs. Reusing that helper-execution flow would violate the analysis contract; language-neutral lint test vectors remain a separate pending facet.",
+      "source_evidence": [
+        {
+          "sha": "8b9bfb97700a707140fff9f444048439df5bc9b1",
+          "path": "internal/lint/lint.go",
+          "start": 159,
+          "end": 187
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "057c03d787e40b52f7c9fc69a3c7fc766616e75f",
+          "path": "src/hungry_crab/miners/inventory.py",
+          "start": 302,
+          "end": 325
+        }
+      ],
+      "denominator": 5,
+      "unreviewed_count": 5,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "vale-cli/vale",
+      "donor_sha": "8b9bfb97700a707140fff9f444048439df5bc9b1",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "3431ad5e013f8a8b413e3f644f1cf93689e7669c0d1bdbb95eaadc99e7dcd64a",
+      "disposition": "out-of-scope",
+      "hypothesis": "Introduce external prose converters into offline auditing",
+      "reason": "Vale lints prose through format helpers. BeautifulRepo guards its tool imports and Action against process/network modules and commands. The converter runtime would break the documented offline stdlib flow; this is a narrow rejection of helper execution, not all prose guidance.",
+      "source_evidence": [
+        {
+          "sha": "8b9bfb97700a707140fff9f444048439df5bc9b1",
+          "path": "internal/lint/lint.go",
+          "start": 159,
+          "end": 187
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tests/test_offline_contract.py",
+          "start": 64,
+          "end": 83
+        }
+      ],
+      "denominator": 6,
+      "unreviewed_count": 6,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "charmbracelet/vhs",
+      "donor_sha": "24fa2254a9806091e6ee6a980e9f3bcfe0a9ba53",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "5e024af1a3d299a1870230a329f73b4c94e52ed2db48a47e559a9ecefa2f235e",
+      "disposition": "out-of-scope",
+      "hypothesis": "Execute terminal recording scripts during repository auditing",
+      "reason": "VHS dispatches keyboard, sleep, environment and screenshot commands to a running terminal. BeautifulRepo offline checkers must inspect repository files without launching target commands. A recording runtime is outside that flow; manually authored demonstration assets are not ruled out.",
+      "source_evidence": [
+        {
+          "sha": "24fa2254a9806091e6ee6a980e9f3bcfe0a9ba53",
+          "path": "command.go",
+          "start": 19,
+          "end": 73
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tests/test_offline_contract.py",
+          "start": 64,
+          "end": 83
+        }
+      ],
+      "denominator": 4,
+      "unreviewed_count": 4,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "kefranabg/readme-md-generator",
+      "donor_sha": "f0370c8efe602bfc1e1334ea556214de4c1b0f04",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "143e19918b9129c365cf2f80aa8d008779abe17733d707f5f1a8ace2a2b96d15",
+      "disposition": "not-useful",
+      "hypothesis": "Prompt before replacing a generated Markdown view",
+      "reason": "The source asks interactively before overwriting a README. BeautifulRepo requires explicit --write to regenerate its owned catalog and writes atomically, with failure-preservation tests. Adding an interactive prompt would obstruct its CI workflow; protection of arbitrary human-owned destinations is not claimed by this conclusion.",
+      "source_evidence": [
+        {
+          "sha": "f0370c8efe602bfc1e1334ea556214de4c1b0f04",
+          "path": "src/ask-overwrite.js",
+          "start": 3,
+          "end": 25
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/catalog.py",
+          "start": 131,
+          "end": 181
+        }
+      ],
+      "denominator": 4,
+      "unreviewed_count": 4,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "cli/cli",
+      "donor_sha": "4f2cfe92e3499f8581bf39db77e0a1431fa7b55c",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "5d43e5b8e1f3d1afa3699a42b92876d81d8fddfeb5cffcc409add194bd460a54",
+      "disposition": "NO_GAP",
+      "hypothesis": "Provide a separate structured audit output mode",
+      "reason": "The source JSON exporter writes serialized data to the designated output stream. BeautifulRepo already offers --format json, direct stdlib serialization, stderr input errors and a defined exit status. The reviewed flow needs no embedded query language.",
+      "source_evidence": [
+        {
+          "sha": "4f2cfe92e3499f8581bf39db77e0a1431fa7b55c",
+          "path": "pkg/cmdutil/json_flags.go",
+          "start": 222,
+          "end": 240
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/repo_audit.py",
+          "start": 486,
+          "end": 508
+        }
+      ],
+      "denominator": 10,
+      "unreviewed_count": 10,
+      "pending_facets": [
+        "recovery-resources-concurrency"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "Textualize/rich",
+      "donor_sha": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "0bd438b646361243c674eaa5f6799d9f787a900db407844d0b0e279908165f0f",
+      "disposition": "NO_GAP",
+      "hypothesis": "Preserve undecorated machine-readable audit reports",
+      "reason": "Rich demonstrates ANSI highlighting in console JSON. BeautifulRepo already emits plain deterministic JSON through an explicit format choice, without terminal decoration or dependencies. Interactive terminal design and accessibility beyond this narrow flow remain pending.",
+      "source_evidence": [
+        {
+          "sha": "9d8f9a372cc5916fd4781fec207ced7ddac2f08f",
+          "path": "tests/test_console.py",
+          "start": 219,
+          "end": 248
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/repo_audit.py",
+          "start": 486,
+          "end": 508
+        }
+      ],
+      "denominator": 14,
+      "unreviewed_count": 14,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "fastapi/typer",
+      "donor_sha": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "9325dcb9f206df7631e190dc8d404c00d7f9b36d720d9bd88922c698f1ab46a0",
+      "disposition": "not-useful",
+      "hypothesis": "Replace the small offline parser with rich framework help",
+      "reason": "The source selects Click or Rich help formatting. BeautifulRepo has a short argparse surface and stdlib-only runtime. A framework migration has concrete dependency cost without a demonstrated need for panels or completion. This does not claim every existing option has ideal descriptive help.",
+      "source_evidence": [
+        {
+          "sha": "a5882dedf0bc7a46cd861fdfca020f88519e0f21",
+          "path": "typer/core.py",
+          "start": 975,
+          "end": 986
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/repo_audit.py",
+          "start": 486,
+          "end": 508
+        }
+      ],
+      "denominator": 12,
+      "unreviewed_count": 12,
+      "pending_facets": [
+        "documentation-contributors"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "yamadashy/repomix",
+      "donor_sha": "5f4923b92a6289cb6497666c6945e95752a1df90",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "25685e53ab7f042ac605efd0d77fcf94aeb3d35339d95f9a9d3efb4f9d8dcbbb",
+      "disposition": "NO_GAP",
+      "hypothesis": "Exclude redirected directories from an audit inventory",
+      "reason": "The donor tests exclude files reached through symlinked directories. BeautifulRepo already refuses symlinks and NTFS junctions in its entry-point inventory, with path-boundary tests. This covers the inventory redirection flow and does not imply hostile-filesystem sandboxing.",
+      "source_evidence": [
+        {
+          "sha": "5f4923b92a6289cb6497666c6945e95752a1df90",
+          "path": "tests/core/file/fileSearchConfineSymlink.test.ts",
+          "start": 36,
+          "end": 54
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/repo_audit.py",
+          "start": 47,
+          "end": 76
+        }
+      ],
+      "denominator": 16,
+      "unreviewed_count": 16,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "coderamp-labs/gitingest",
+      "donor_sha": "4e259a02fe72115bee538271622f1234a81c8e1a",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "9a5880acb8cf13cf6d92d9fa4672c6cc73b6354e0c5cd21a94a08be67d988377",
+      "disposition": "out-of-scope",
+      "hypothesis": "Fetch remote repositories from the offline audit command",
+      "reason": "The donor parses and resolves remote repositories. BeautifulRepo accepts a local directory and statically guards network/process imports. Adding acquisition to the audit command changes its offline contract; a separately operated acquisition companion is outside the selected flow.",
+      "source_evidence": [
+        {
+          "sha": "4e259a02fe72115bee538271622f1234a81c8e1a",
+          "path": "src/gitingest/query_parser.py",
+          "start": 25,
+          "end": 36
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tests/test_offline_contract.py",
+          "start": 64,
+          "end": 83
+        }
+      ],
+      "denominator": 12,
+      "unreviewed_count": 12,
+      "pending_facets": [
+        "recovery-resources-concurrency"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "RichardLitt/standard-readme",
+      "donor_sha": "5d18ad4db6a39fde5dc845258828153eda9828e8",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "0a33374ac6cc299b00dc33a0778531433f96126ffd91659730af15faa97cf15d",
+      "disposition": "not-useful",
+      "hypothesis": "Enforce the donor library-specific heading order on every README",
+      "reason": "The source requires prescribed section titles and order for a library README. BeautifulRepo deliberately supplies several audience-specific scaffolds with user outcomes, setup and limitations. A universal library order would erase that distinction; link integrity and useful examples remain valid independent requirements.",
+      "source_evidence": [
+        {
+          "sha": "5d18ad4db6a39fde5dc845258828153eda9828e8",
+          "path": "spec.md",
+          "start": 7,
+          "end": 14
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "templates/README.template.md",
+          "start": 1,
+          "end": 36
+        }
+      ],
+      "denominator": 3,
+      "unreviewed_count": 3,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    },
+    {
+      "maw": "beautiful",
+      "repo": "python-jsonschema/jsonschema",
+      "donor_sha": "c497561ea0a95f5aac09cd63d15eb1420eb7bbec",
+      "receiver_sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+      "snapshot": "1dce3111853cd9d76af26ec4f9a58ca5760152086ee3a6cd7cd6f97089cedca0",
+      "disposition": "NO_GAP",
+      "hypothesis": "Identify the failing catalog entry in validation feedback",
+      "reason": "The donor renders exact error locations. BeautifulRepo already labels each resource by array index and available id, then names invalid fields. That meets the inspected catalog flow; nested arbitrary schema validation and JSONPath syntax are not required or declared complete.",
+      "source_evidence": [
+        {
+          "sha": "c497561ea0a95f5aac09cd63d15eb1420eb7bbec",
+          "path": "jsonschema/exceptions.py",
+          "start": 138,
+          "end": 171
+        }
+      ],
+      "maw_evidence": [
+        {
+          "sha": "beabbba2ed903e53b9339269b6dbfa7684029251",
+          "path": "tools/catalog.py",
+          "start": 48,
+          "end": 66
+        }
+      ],
+      "denominator": 11,
+      "unreviewed_count": 11,
+      "pending_facets": [
+        "testing"
+      ],
+      "exploration_complete": false,
+      "registered_card": null,
+      "registered_serve_as": null
+    }
+  ],
+  "learning_audit": {
+    "historical_generic_declines": 78,
+    "generic_reason_strings": 8,
+    "audit": {
+      "crab": {
+        "confirmed_inputs": 59,
+        "unverified_legacy_inputs": 59,
+        "overlapping_declined_stable_ids": 10,
+        "matching_generic_reason_votes": 0,
+        "memory": {
+          "schema": "hungry-crab.memory/1",
+          "enabled": true,
+          "decisions": 59,
+          "fingerprint": "e77bc49cfba0e9f97e65a611585d40c8196ddc69c93feed4cb2072ad0e31828f",
+          "min_decisions": 3,
+          "strength": 0.3,
+          "categories": {
+            "architecture": {
+              "accepted": 0,
+              "rejected": 10,
+              "factor": 0.75,
+              "baseline": 0.4,
+              "effective": 0.3,
+              "owner_override": false
+            },
+            "ci": {
+              "accepted": 0,
+              "rejected": 2,
+              "factor": 1.0,
+              "baseline": 0.9,
+              "effective": 0.9,
+              "owner_override": false
+            },
+            "deps": {
+              "accepted": 0,
+              "rejected": 6,
+              "factor": 0.775,
+              "baseline": 0.45,
+              "effective": 0.34875,
+              "owner_override": false
+            },
+            "docs": {
+              "accepted": 0,
+              "rejected": 1,
+              "factor": 1.0,
+              "baseline": 0.6,
+              "effective": 0.6,
+              "owner_override": false
+            },
+            "history-lesson": {
+              "accepted": 0,
+              "rejected": 13,
+              "factor": 0.74,
+              "baseline": 0.55,
+              "effective": 0.407,
+              "owner_override": false
+            },
+            "hygiene": {
+              "accepted": 0,
+              "rejected": 2,
+              "factor": 1.0,
+              "baseline": 0.7,
+              "effective": 0.7,
+              "owner_override": false
+            },
+            "issue-lesson": {
+              "accepted": 0,
+              "rejected": 17,
+              "factor": 0.731579,
+              "baseline": 0.5,
+              "effective": 0.365789,
+              "owner_override": false
+            },
+            "security": {
+              "accepted": 0,
+              "rejected": 1,
+              "factor": 1.0,
+              "baseline": 1.0,
+              "effective": 1.0,
+              "owner_override": false
+            },
+            "tests": {
+              "accepted": 0,
+              "rejected": 2,
+              "factor": 1.0,
+              "baseline": 0.85,
+              "effective": 0.85,
+              "owner_override": false
+            },
+            "tooling": {
+              "accepted": 0,
+              "rejected": 5,
+              "factor": 0.785714,
+              "baseline": 0.8,
+              "effective": 0.628571,
+              "owner_override": false
+            }
+          }
+        }
+      },
+      "beautiful": {
+        "confirmed_inputs": 0,
+        "unverified_legacy_inputs": 0,
+        "overlapping_declined_stable_ids": 0,
+        "matching_generic_reason_votes": 0,
+        "memory": {
+          "schema": "hungry-crab.memory/1",
+          "enabled": true,
+          "decisions": 0,
+          "fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "min_decisions": 3,
+          "strength": 0.3,
+          "categories": {}
+        }
+      }
+    },
+    "causal_limit": "Stable-id overlap alone cannot attribute historical feedback to this pilot; no old ledger event history was invented. Exploration writes no feedback."
+  },
+  "tool_inputs": [
+    "{\"source_sha256\": \"ac422899cdc627071a33a8d9d0f8b7bc284058701af62c81518b84bf1295bbd0\", \"version\": \"0.6.5.dev0\"}"
+  ],
+  "method": "Main-session bounded source and receiving-file review; no independent auditor, no donor execution, no new remote acquisition",
+  "limits": "One examined receiving-flow hypothesis per public pair; the second selected facet and all 166 original structural cards remain unreviewed, along with shallow history, issues and wiki. A registered idea is not an implemented or accepted transfer."
+}

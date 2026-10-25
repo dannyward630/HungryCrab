@@ -56,6 +56,17 @@ def test_capacity_and_path_are_real_boundaries(
         AcquisitionBudget(tmp_path, tmp_path.parent / "outside", 10, 1)
 
 
+def test_concurrent_acquisitions_of_one_volume_fail_before_network(
+    quota: AcquisitionBudget,
+) -> None:
+    from hungry_crab.errors import CrabError
+
+    with quota.scope(), pytest.raises(CrabError, match="another process"), quota.scope():
+        pytest.fail("a second acquisition entered the same finite storage domain")
+    with quota.scope():
+        assert quota._server is not None
+
+
 @pytest.mark.parametrize("reason", ["download budget exceeded", "disk capacity exhausted"])
 def test_feeder_never_exports_a_success_bundle_after_a_quota_refusal(
     quota: AcquisitionBudget, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str
@@ -186,7 +197,9 @@ def test_concurrent_reads_cannot_each_spend_the_remaining_allowance(
     assert quota.downloaded == 6 and len(failures) == 3
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group boundary")
+@pytest.mark.skipif(
+    os.name != "posix" and sys.platform != "win32", reason="requires process-tree cancellation"
+)
 def test_timeout_reaps_git_style_descendants_before_staging_cleanup(tmp_path: Path) -> None:
     spawned, escaped = tmp_path / "spawned", tmp_path / "escaped"
     program = (

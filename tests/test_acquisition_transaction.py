@@ -241,7 +241,9 @@ def test_feeder_rejects_unowned_live_cache_before_sniff_can_claim_it(
     assert not list(quota.volume.glob(".acquisition-*"))
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX scoped execution")
+@pytest.mark.skipif(
+    os.name != "posix" and os.name != "nt", reason="requires scoped process-tree execution"
+)
 def test_filter_probe_obeys_real_stdout_cap_without_running_any_driver(
     quota: AcquisitionBudget, tmp_path: Path
 ) -> None:

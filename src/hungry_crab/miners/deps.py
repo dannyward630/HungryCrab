@@ -106,7 +106,9 @@ def parse_package_json(text: str, manifest: str) -> tuple[list[Package], dict[st
         "version": data.get("version") if isinstance(data.get("version"), str) else None,
         "private": bool(data.get("private")),
         "type": data.get("type") if isinstance(data.get("type"), str) else None,
-        "scripts": {k: str(v)[:160] for k, v in scripts.items()}
+        "scripts": {
+            k: v for k, v in list(scripts.items())[:128] if isinstance(v, str) and len(v) <= 4096
+        }
         if isinstance(scripts, dict)
         else {},
         "engines": data.get("engines") if isinstance(data.get("engines"), dict) else {},

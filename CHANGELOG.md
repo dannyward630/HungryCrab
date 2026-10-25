@@ -9,10 +9,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Record supervised exploration goals, immutable inputs, original candidate sets, examined
+  hypotheses and phase-specific observations with `crab explore`. Register source-linked
+  non-trait behavior nutrients under existing grant, origin, hunger and publication guards.
+- Support bounded local catch on Linux volumes and native Windows fixed-capacity volumes/VHDs
+  with Job Object process-tree cancellation, shared download budgets and volume contention
+  refusal. Exercise real hard acquisition quotas on both operating systems.
+
 - Run commit-pinned Python CodeQL analysis on pull requests, master pushes and a weekly
   schedule, with job-scoped upload permissions and preserved MIT attribution.
 
 ### Fixed
+
+- Preserve unmanaged and edited legal notices before attribution/publication, including
+  fetched-base drift; use a separately configured generated notice alongside a human index.
+- Retain portable file/range evidence across runner roots and support local comparison of
+  public donor digest artifacts against inert immutable Git objects. Separate package
+  ecosystem facts from grounded manifest-free runtime eligibility.
+- Share CI tool classification and bounded package-script resolution across workflows, traits
+  and candidate evidence. Keep unresolved indirection unknown. Complete public CLI help and
+  distinguish issue lessons using source/issue facts without carrying commenter titles.
+- Recognize bounded ordinary MIT copyright metadata, preserving notices and refusing
+  restrictive riders and unsupported operative text.
+- Exclude inert Python and JS/TS comment/string contents from architecture symbols and
+  imports, including nested templates; qualify ambiguous regex/JSX and lexical coverage.
 
 - Recognize explicit Python unittest invocations in CI, including versioned interpreters
   and uv wrappers, so stdlib projects do not receive a false missing-test-runner nutrient.

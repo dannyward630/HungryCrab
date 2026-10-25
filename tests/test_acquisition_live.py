@@ -73,6 +73,18 @@ def test_real_https_git_quota_cancellation_and_cache_preservation(
         timeout=30,
     )
     monkeypatch.setenv("GIT_SSL_CAINFO", str(cert))
+    git_environment = AcquisitionBudget.git_env
+
+    def fixture_tls(self: AcquisitionBudget, base: dict[str, str]) -> dict[str, str]:
+        env = git_environment(self, base)
+        if os.name == "nt":
+            count = int(env["GIT_CONFIG_COUNT"])
+            env[f"GIT_CONFIG_KEY_{count}"] = "http.sslBackend"
+            env[f"GIT_CONFIG_VALUE_{count}"] = "openssl"
+            env["GIT_CONFIG_COUNT"] = str(count + 1)
+        return env
+
+    monkeypatch.setattr(AcquisitionBudget, "git_env", fixture_tls)
     # An inherited per-URL proxy outranks a broad proxy setting unless stripped first.
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "http.https://github.com/fixture/prey.git.proxy")
@@ -88,7 +100,7 @@ def test_real_https_git_quota_cancellation_and_cache_preservation(
                 [
                     "git",
                     "-c",
-                    "core.hooksPath=/dev/null",
+                    f"core.hooksPath={os.devnull}",
                     "upload-pack",
                     "--stateless-rpc",
                     "--advertise-refs",
@@ -108,7 +120,7 @@ def test_real_https_git_quota_cancellation_and_cache_preservation(
                 [
                     "git",
                     "-c",
-                    "core.hooksPath=/dev/null",
+                    f"core.hooksPath={os.devnull}",
                     "upload-pack",
                     "--stateless-rpc",
                     str(repo),

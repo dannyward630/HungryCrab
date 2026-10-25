@@ -9,7 +9,41 @@ from __future__ import annotations
 from typing import Any
 
 from ..typeutil import as_dict
-from .base import MineContext, MinerResult
+from .base import FileInfo, MineContext, MinerResult
+from .ci_tools import LINT_TOOLS, TEST_TOOLS
+from .inventory import CORPUS_DIRS, EXAMPLE_DIRS, VENDORED_DIRS
+
+RUNTIME_LANGUAGES = {
+    "Python": "python",
+    "TypeScript": "npm",
+    "JavaScript": "npm",
+    "C#": "dotnet",
+    "F#": "dotnet",
+    "Go": "go",
+    "Rust": "rust",
+}
+
+
+def runtime_evidence(files: list[FileInfo]) -> dict[str, list[str]]:
+    """Ground runtime eligibility in selected first-party source, independently of packages."""
+    evidence: dict[str, list[str]] = {}
+    for info in files:
+        if not info.counted or not info.is_code:
+            continue
+        if any(
+            part.casefold()
+            in {"docs", "doc", "documentation", "tests", "test"}
+            | CORPUS_DIRS
+            | EXAMPLE_DIRS
+            | VENDORED_DIRS
+            for part in info.path.split("/")[:-1]
+        ):
+            continue
+        ecosystem = RUNTIME_LANGUAGES.get(info.language or "")
+        if ecosystem and len(evidence.setdefault(ecosystem, [])) < 5:
+            evidence[ecosystem].append(info.path)
+    return {key: sorted(paths) for key, paths in sorted(evidence.items())}
+
 
 LINTER_PACKAGES: dict[str, str] = {
     "eslint": "eslint",
@@ -107,42 +141,8 @@ FORMATTER_CONFIGS: dict[str, str] = {
     ".csharpierrc.json": "csharpier",
     ".csharpierrc.yaml": "csharpier",
 }
-_TEST_TOOLS = {
-    "pytest",
-    "unittest",
-    "vitest",
-    "jest",
-    "mocha",
-    "playwright",
-    "cypress",
-    "npm test",
-    "dotnet test",
-    "cargo test",
-    "go test",
-    "tox",
-    "nox",
-}
-_LINT_TOOLS = {
-    "ruff",
-    "black",
-    "flake8",
-    "isort",
-    "mypy",
-    "pyright",
-    "eslint",
-    "prettier",
-    "biome",
-    "tsc",
-    "dotnet format",
-    "cargo clippy",
-    "cargo fmt",
-    "go vet",
-    "golangci-lint",
-    "markdownlint",
-    "shellcheck",
-    "actionlint",
-    "pre-commit",
-}
+_TEST_TOOLS = TEST_TOOLS
+_LINT_TOOLS = LINT_TOOLS
 _COMPOSE_FILES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
 
 
@@ -219,6 +219,9 @@ class TraitsMiner:
         instruction_tools = {g["tool"] for g in ai["instruction_files"]}
         dependabot_updates = as_dict(ci.get("dependabot")).get("updates", [])
         ci_tools = set(features["tools"])
+        ci_commands_unknown = any(
+            workflow.get("unresolved_scripts") for workflow in ci.get("workflows", [])
+        )
         workspace_manifest = any(
             m["path"].startswith(("packages/", "apps/", "crates/")) for m in inventory["manifests"]
         )
@@ -231,6 +234,8 @@ class TraitsMiner:
             "files": inventory["files_counted"],
             "files_all": inventory["files"],
             "ecosystems": deps["ecosystems"],
+            "runtime_ecosystems": sorted(runtime_evidence(files)),
+            "runtime_evidence": runtime_evidence(files),
             "monorepo": bool(deps.get("workspaces")) or workspace_manifest,
             # license
             "has_license": bool(license_data["license_files"]),
@@ -259,8 +264,17 @@ class TraitsMiner:
             "ci_windows_runner": features["windows_runner"],
             "ci_macos_runner": features["macos_runner"],
             "ci_tools": features["tools"],
-            "ci_runs_tests": bool(ci_tools & _TEST_TOOLS),
-            "ci_runs_lint": bool(ci_tools & _LINT_TOOLS),
+            "ci_runs_tests": True
+            if ci_tools & _TEST_TOOLS
+            else None
+            if ci_commands_unknown
+            else False,
+            "ci_runs_lint": True
+            if ci_tools & _LINT_TOOLS
+            else None
+            if ci_commands_unknown
+            else False,
+            "ci_commands_unknown": ci_commands_unknown,
             "ci_pipe_to_shell": features["pipe_to_shell_steps"] > 0,
             # tooling
             "has_dependabot": features["dependabot"],

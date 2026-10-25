@@ -28,6 +28,7 @@ from .compare import compare_for_maw, load_menu, meal_for, menu_candidates
 from .compare.scoring import Scoring
 from .digest import DigestOptions, DigestResult, failed_miners, run_digest
 from .errors import CrabError, UsageError
+from .exploration_cli import add_exploration_parser, cmd_explore
 from .feeder import EatOptions, eat
 from .fetch.cache_identity import require_cache_identity
 from .fetch.catch import CatchOptions, catch, rmtree_force
@@ -87,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-q", "--quiet", action="store_true", help="no progress output on stderr")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
     add_loop_parser(sub)
+    add_exploration_parser(sub)
 
     p_sniff = sub.add_parser("sniff", help="API reconnaissance: license, size, languages, verdict")
     p_sniff.add_argument("repo", help="owner/repo or a GitHub URL")
@@ -119,8 +121,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="also fetch up to N issues (plus the top by reactions)",
     )
-    p_catch.add_argument("--json", action="store_true")
+    p_catch.add_argument("--json", action="store_true", help="print the result as JSON")
     p_catch.add_argument("--no-wiki", action="store_true", help="skip the independent wiki")
+    p_catch.add_argument(
+        "--acquisition-volume",
+        type=Path,
+        help="dedicated fixed-capacity Linux or Windows volume for bounded catch",
+    )
+    p_catch.add_argument(
+        "--max-download-bytes",
+        type=int,
+        default=None,
+        help="shared TLS byte budget for repository and wiki (default: 314572800)",
+    )
+    p_catch.add_argument(
+        "--max-acquisition-disk-bytes",
+        type=int,
+        default=None,
+        help="maximum verified volume capacity including staging (default: 1073741824)",
+    )
 
     p_eat = sub.add_parser(
         "eat", help="deterministic Feeder: acquire, digest, compare and export; no ledger or issues"
@@ -134,9 +153,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="run the Python pipeline without a model",
     )
-    p_eat.add_argument("--maw", type=Path, default=Path())
+    p_eat.add_argument("--maw", type=Path, default=Path(), help="maw repository (default: .)")
     p_eat.add_argument("--out", type=Path, help="new/empty bundle directory (default: cache)")
-    p_eat.add_argument("--shallow", action=argparse.BooleanOptionalAction, default=True)
+    p_eat.add_argument(
+        "--shallow",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="acquire depth-one history (default: enabled; --no-shallow requests history)",
+    )
     p_eat.add_argument(
         "--since", default="90d", help="history window; use 'all' for no date cutoff"
     )
@@ -146,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=100,
         help="recent issues to read; 0 disables issue acquisition",
     )
-    p_eat.add_argument("--no-wiki", action="store_true")
+    p_eat.add_argument("--no-wiki", action="store_true", help="skip the independent wiki")
     p_eat.add_argument(
         "--allow-unknown-size",
         action="store_true",
@@ -158,10 +182,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="dedicated fixed-capacity filesystem for remote acquisition",
     )
-    p_eat.add_argument("--max-download-bytes", type=int, default=300 * 1024 * 1024)
-    p_eat.add_argument("--max-acquisition-disk-bytes", type=int, default=1024 * 1024 * 1024)
-    p_eat.add_argument("--depth", choices=("normal", "deep"), default="normal")
-    p_eat.add_argument("--top", type=int, default=30)
+    p_eat.add_argument(
+        "--max-download-bytes",
+        type=int,
+        default=300 * 1024 * 1024,
+        help="shared TLS download byte limit for repository and wiki (default: 314572800)",
+    )
+    p_eat.add_argument(
+        "--max-acquisition-disk-bytes",
+        type=int,
+        default=1024 * 1024 * 1024,
+        help="maximum backing-device capacity in bytes, including staging (default: 1073741824)",
+    )
+    p_eat.add_argument(
+        "--depth",
+        choices=("normal", "deep"),
+        default="normal",
+        help="analysis depth and miner read budgets (default: normal)",
+    )
+    p_eat.add_argument("--top", type=int, default=30, help="maximum candidates shown (default: 30)")
     p_eat.add_argument(
         "--max-repo-kb",
         type=int,
@@ -171,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eat.add_argument(
         "--allow-loss", action="store_true", help="explicitly accept inventory visibility loss"
     )
-    p_eat.add_argument("--json", action="store_true")
+    p_eat.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_digest = sub.add_parser(
         "digest", help="run the miners; write digest/ for owner/repo or a local path"
@@ -180,7 +219,12 @@ def build_parser() -> argparse.ArgumentParser:
         "target",
         help="owner/repo, a GitHub URL, or a local directory (pass --maw . to digest the maw)",
     )
-    p_digest.add_argument("--depth", choices=("normal", "deep"), default="normal")
+    p_digest.add_argument(
+        "--depth",
+        choices=("normal", "deep"),
+        default="normal",
+        help="analysis depth and miner read budgets (default: normal)",
+    )
     p_digest.add_argument(
         "--out", type=Path, default=None, help="write the digest here instead of the cache"
     )
@@ -230,7 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare.add_argument(
         "--maw-license", default=None, help="maw license SPDX id (else detected)"
     )
-    p_compare.add_argument("--depth", choices=("normal", "deep"), default="normal")
+    p_compare.add_argument(
+        "--depth",
+        choices=("normal", "deep"),
+        default="normal",
+        help="analysis depth and miner read budgets (default: normal)",
+    )
     p_compare.add_argument("--force", action="store_true", help="re-run both digests")
     p_compare.add_argument("--top", type=int, default=30, help="candidates shown in menu.md")
     p_compare.add_argument("--shallow", action="store_true", help="when catching first: --shallow")
@@ -247,30 +296,77 @@ def build_parser() -> argparse.ArgumentParser:
         help="compare a digest whose miners did not all succeed",
     )
     p_compare.add_argument("--json", action="store_true", help="print menu.json")
+    p_compare.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="read the existing ledger snapshot without recording this comparison",
+    )
+    p_compare.add_argument(
+        "--prey-digest",
+        type=Path,
+        help="verified public donor digest artifact; compare locally without acquisition",
+    )
+    p_compare.add_argument(
+        "--prey-objects",
+        type=Path,
+        help="inert Git object store containing the donor digest's immutable commit",
+    )
 
     p_init = sub.add_parser("init", help="write a default .crab.yml into the maw repository")
     p_init.add_argument("--maw", type=Path, default=Path(), help="maw repository (default: .)")
     p_init.add_argument("--force", action="store_true", help="overwrite an existing file")
-    p_init.add_argument("--profile", choices=(*PROFILES, "auto"), default="balanced")
+    p_init.add_argument(
+        "--profile",
+        choices=(*PROFILES, "auto"),
+        default="balanced",
+        help="initial hunger profile (default: balanced)",
+    )
     p_profiles = sub.add_parser("profiles", help="list reviewed hunger profiles")
-    p_profiles.add_argument("--json", action="store_true")
+    p_profiles.add_argument("--json", action="store_true", help="print the result as JSON")
     p_hunt = sub.add_parser("hunt", help="discover prey from this maw's gaps and taste memory")
-    p_hunt.add_argument("--for", dest="maw", type=Path, default=Path())
-    p_hunt.add_argument("--query", action="append", default=None)
-    p_hunt.add_argument("--limit", type=int, default=None)
-    p_hunt.add_argument("--min-stars", type=int, default=None)
-    p_hunt.add_argument("--include-seen", action="store_true")
-    p_hunt.add_argument("--allow-unknown-size", action="store_true")
-    p_hunt.add_argument("--json", action="store_true")
+    p_hunt.add_argument(
+        "--for",
+        dest="maw",
+        type=Path,
+        default=Path(),
+        help="maw repository whose gaps guide discovery (default: .)",
+    )
+    p_hunt.add_argument(
+        "--query",
+        action="append",
+        default=None,
+        help="additional discovery query; repeat for multiple queries",
+    )
+    p_hunt.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="maximum discovered repositories (else maw hunt policy)",
+    )
+    p_hunt.add_argument(
+        "--min-stars",
+        type=int,
+        default=None,
+        help="minimum repository stars (else maw hunt policy)",
+    )
+    p_hunt.add_argument(
+        "--include-seen", action="store_true", help="include previously encountered prey"
+    )
+    p_hunt.add_argument(
+        "--allow-unknown-size",
+        action="store_true",
+        help="explicitly accept missing provider repository-size metadata",
+    )
+    p_hunt.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_ledger = sub.add_parser("ledger", help="show or update the maw ledger")
     p_ledger.add_argument("--maw", type=Path, default=Path(), help="maw repository (default: .)")
     ledger_sub = p_ledger.add_subparsers(dest="ledger_command", metavar="<action>")
     p_show = ledger_sub.add_parser("show", help="print the ledger summary (default)")
-    p_show.add_argument("--json", action="store_true")
+    p_show.add_argument("--json", action="store_true", help="print the result as JSON")
     p_mark = ledger_sub.add_parser("mark", help="record a decision for a nutrient")
     p_mark.add_argument("id", help="nutrient id, e.g. crab:ci:ci.cache")
-    p_mark.add_argument("status", choices=STATUSES)
+    p_mark.add_argument("status", choices=STATUSES, help="new ledger status for the nutrient")
     p_mark.add_argument("--reason", default="", help="why (kept for crab tune)")
     p_mark.add_argument("--url", default=None, help="issue or pull request URL")
 
@@ -296,7 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument(
         "--notes", type=Path, default=None, help="JSON with why/how per id (model-written)"
     )
-    p_serve.add_argument("--json", action="store_true")
+    p_serve.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_attribution = sub.add_parser(
         "attribution",
@@ -326,8 +422,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_tune = sub.add_parser("tune", help="suggest scoring weight changes from the ledger")
     p_tune.add_argument("--maw", type=Path, default=Path(), help="maw repository (default: .)")
     p_tune.add_argument("--write", action="store_true", help="apply the suggestions to .crab.yml")
-    p_tune.add_argument("--min-decisions", type=int, default=3)
-    p_tune.add_argument("--json", action="store_true")
+    p_tune.add_argument(
+        "--min-decisions",
+        type=int,
+        default=3,
+        help="minimum labelled decisions before suggesting weights (default: 3)",
+    )
+    p_tune.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_menu = sub.add_parser("menu", help="print the ranked menu from the last compare")
     p_menu.add_argument("prey", nargs="?", help="owner/repo, a GitHub URL, or a local directory")
@@ -335,10 +436,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_menu.add_argument(
         "--maw", type=Path, default=Path(), help="maw repository whose meal to read (default: .)"
     )
-    p_menu.add_argument("--top", type=int, default=30)
+    p_menu.add_argument(
+        "--top", type=int, default=30, help="maximum candidates shown (default: 30)"
+    )
     p_menu.add_argument("--category", default=None, help="comma-separated categories to show")
     p_menu.add_argument("--all", action="store_true", help="also list hidden candidates")
-    p_menu.add_argument("--json", action="store_true")
+    p_menu.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_update = sub.add_parser(
         "update", help="check the CLI and the agent plugins, and bring them up to date"
@@ -346,17 +449,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument(
         "--run", action="store_true", help="run the updates instead of only printing them"
     )
-    p_update.add_argument("--json", action="store_true")
+    p_update.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p_cache = sub.add_parser("cache", help="inspect or clean the cache")
     cache_sub = p_cache.add_subparsers(dest="cache_command", metavar="<action>")
     cache_sub.add_parser("path", help="print the cache directory")
     cache_sub.add_parser("ls", help="list cached prey")
     p_rm = cache_sub.add_parser("rm", help="remove one cached prey (clone, API data and digests)")
-    p_rm.add_argument("repo")
+    p_rm.add_argument("repo", help="owner/repo to remove from the cache")
 
     p_report = sub.add_parser("report", help="render an existing digest or meal as offline HTML")
-    p_report.add_argument("source", type=Path)
+    p_report.add_argument(
+        "source", type=Path, help="digest, meal or exported bundle directory to render"
+    )
     p_report.add_argument("--out", type=Path, required=True, help="destination .html file")
     p_report.add_argument(
         "--force", action="store_true", help="replace an existing regular HTML file"
@@ -442,6 +547,12 @@ def cmd_sniff(args: argparse.Namespace, log: Callable[[str], None]) -> int:
 
 def cmd_catch(args: argparse.Namespace, log: Callable[[str], None]) -> int:
     slug = Slug.parse(args.repo)
+    if args.acquisition_volume is None and (
+        args.max_download_bytes is not None or args.max_acquisition_disk_bytes is not None
+    ):
+        raise UsageError(
+            "acquisition limits require --acquisition-volume; refusing unbounded fallback"
+        )
     options = CatchOptions(
         shallow=args.shallow,
         since=args.since,
@@ -451,6 +562,13 @@ def cmd_catch(args: argparse.Namespace, log: Callable[[str], None]) -> int:
         reviews=getattr(args, "reviews", 0),
         runs=getattr(args, "runs", 0),
         wiki=not args.no_wiki,
+        acquisition_volume=args.acquisition_volume,
+        max_download_bytes=args.max_download_bytes
+        if args.max_download_bytes is not None
+        else 300 * 1024 * 1024,
+        max_disk_bytes=args.max_acquisition_disk_bytes
+        if args.max_acquisition_disk_bytes is not None
+        else 1024 * 1024 * 1024,
     )
     result = catch(slug, options, cache_root=args.cache_dir, log=log)
     if args.json:
@@ -658,6 +776,9 @@ def cmd_compare(args: argparse.Namespace, log: Callable[[str], None]) -> int:
         issue_lookup=lookup,
         log=log,
         allow_partial=args.allow_partial,
+        prey_digest_dir=args.prey_digest,
+        prey_objects=args.prey_objects,
+        record_ledger=not args.no_ledger,
     )
     if args.json:
         print(json.dumps(result.menu, indent=2, ensure_ascii=False))
@@ -1042,6 +1163,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "loop":
             return cmd_loop(args)
+        if args.command == "explore":
+            return cmd_explore(args)
         if args.command == "sniff":
             return cmd_sniff(args, log)
         if args.command == "catch":
