@@ -123,6 +123,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_catch.add_argument("--json", action="store_true", help="print the result as JSON")
     p_catch.add_argument("--no-wiki", action="store_true", help="skip the independent wiki")
+    p_catch.add_argument(
+        "--acquisition-volume",
+        type=Path,
+        help="dedicated fixed-capacity Linux or Windows volume for bounded catch",
+    )
+    p_catch.add_argument(
+        "--max-download-bytes",
+        type=int,
+        default=None,
+        help="shared TLS byte budget for repository and wiki (default: 314572800)",
+    )
+    p_catch.add_argument(
+        "--max-acquisition-disk-bytes",
+        type=int,
+        default=None,
+        help="maximum verified volume capacity including staging (default: 1073741824)",
+    )
 
     p_eat = sub.add_parser(
         "eat", help="deterministic Feeder: acquire, digest, compare and export; no ledger or issues"
@@ -525,6 +542,12 @@ def cmd_sniff(args: argparse.Namespace, log: Callable[[str], None]) -> int:
 
 def cmd_catch(args: argparse.Namespace, log: Callable[[str], None]) -> int:
     slug = Slug.parse(args.repo)
+    if args.acquisition_volume is None and (
+        args.max_download_bytes is not None or args.max_acquisition_disk_bytes is not None
+    ):
+        raise UsageError(
+            "acquisition limits require --acquisition-volume; refusing unbounded fallback"
+        )
     options = CatchOptions(
         shallow=args.shallow,
         since=args.since,
@@ -534,6 +557,13 @@ def cmd_catch(args: argparse.Namespace, log: Callable[[str], None]) -> int:
         reviews=getattr(args, "reviews", 0),
         runs=getattr(args, "runs", 0),
         wiki=not args.no_wiki,
+        acquisition_volume=args.acquisition_volume,
+        max_download_bytes=args.max_download_bytes
+        if args.max_download_bytes is not None
+        else 300 * 1024 * 1024,
+        max_disk_bytes=args.max_acquisition_disk_bytes
+        if args.max_acquisition_disk_bytes is not None
+        else 1024 * 1024 * 1024,
     )
     result = catch(slug, options, cache_root=args.cache_dir, log=log)
     if args.json:

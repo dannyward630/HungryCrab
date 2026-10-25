@@ -24,6 +24,10 @@ def cleanup(root: Path) -> None:
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        from acquisition_volume_windows import main as windows_main
+
+        return windows_main()
     if len(sys.argv) == 3 and sys.argv[1] == "cleanup":
         cleanup(Path(sys.argv[2]))
         return 0
