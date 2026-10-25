@@ -26,11 +26,15 @@ maw's (same files). The caller may also name specific maw files to look at.
 
 1. From both `architecture.md`: hubs, orchestrators, directory layering, cycles, public surface.
    From both `inventory.md`: top-level roles and sizes.
+   Read coverage and uncertainty first. A partial lexical graph cannot prove an absent
+   dependency, cycle or public entry point; inspect bounded pinned source for the hypothesis.
 2. Look for differences that explain something the maw suffers from: a cycle the prey avoided,
    a hub the prey split, a public surface the prey keeps small, a layering the prey enforces.
 3. Propose at most three nutrients. Each: the structural change in one sentence, the evidence
    on both sides (paths and numbers), the first refactoring step, and the risk.
-4. Say explicitly when there is nothing worth changing.
+4. State the examined scope and evidence for an already-present or no-gap result. Keep
+   unsupported languages, uninspected paths and uncertain graph edges pending. Return the
+   findings to the caller's `crab explore` record; this read-only agent cannot close other facets.
 
 ## Output
 

@@ -14,6 +14,7 @@ from hungry_crab.compare import compare_for_maw, load_menu
 from hungry_crab.digest import DigestOptions
 from hungry_crab.errors import CrabError
 from hungry_crab.exploration import events, initialize, record, register, report
+from hungry_crab.nutrients import Candidate
 
 PLAN = {
     "scope": "bounded streaming for one receiving flow",
@@ -258,6 +259,87 @@ def test_event_history_is_append_only_and_content_bound(tmp_path: Path) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(CrabError, match="chain is inconsistent"):
         report(directory)
+
+
+def test_later_served_dedup_preserves_original_denominator(tmp_path: Path) -> None:
+    donor = repository(
+        tmp_path / "donor",
+        {"app.py": "pass\n", ".github/dependabot.yml": "version: 2\nupdates: []\n"},
+    )
+    maw = repository(
+        tmp_path / "maw",
+        {"app.py": "pass\n", ".crab.yml": "ledger: repo\n", ".gitignore": ".crab/\n"},
+    )
+    options = DigestOptions(cache_root=tmp_path / "cache")
+    first, _, ledger, _ = compare_for_maw(Target(path=donor), maw, digest_options=options)
+    assert first.meal_dir is not None and first.menu["candidates"]
+    directory = initialize(first.meal_dir, PLAN, maw=maw)
+    original = (directory / "snapshot.json").read_bytes()
+    card = Candidate.from_dict(first.menu["candidates"][0])
+    ledger.mark(card.id, "served", url="https://example.invalid/issues/1")
+    ledger.entries[card.id].feedback = "rejected"  # A legacy vote without exploration evidence.
+    ledger.save()
+    later, _, _, _ = compare_for_maw(Target(path=donor), maw, digest_options=options)
+    assert later.meal_dir is not None
+    later_directory = initialize(later.meal_dir, PLAN, maw=maw)
+    assert card.id not in {c["id"] for c in later.menu["candidates"]}
+    assert card.id in report(later_directory)["unreviewed_candidates"]
+    assert report(later_directory)["denominator"] == report(directory)["denominator"]
+    assert (directory / "snapshot.json").read_bytes() == original
+    assert later_directory != directory
+    assert not report(later_directory)["exploration_complete"]
+    audit = report(later_directory)["learning_audit"]
+    assert audit["actual_learning_input_ids"] == [card.id]
+    assert audit["unverified_legacy_feedback"] == [card.id]
+    assert ledger.path is not None
+    before = ledger.path.read_bytes()
+    record(
+        later_directory,
+        {
+            "kind": "decision",
+            "hypothesis": "another uninspected behavior",
+            "disposition": "not-investigated",
+            "reviewed": False,
+            "author": "synthetic operator",
+            "tool": "pytest",
+            "attempt": "no-learning-control",
+            "reason": "no source investigation took place",
+        },
+    )
+    assert ledger.path.read_bytes() == before
+
+
+def test_dirty_and_policy_inputs_have_distinct_identities_at_the_same_commit(
+    tmp_path: Path,
+) -> None:
+    directory, donor, maw, _ = pair(tmp_path)
+    baseline = json.loads((directory / "snapshot.json").read_text(encoding="utf-8"))
+    (maw / "app.py").write_text(STREAMING, encoding="utf-8")
+    with pytest.raises(CrabError, match="maw changed"):
+        initialize(directory.parent.parent, PLAN, maw=maw)
+
+    def snapshot() -> dict[str, Any]:
+        result, _, _, _ = compare_for_maw(
+            Target(path=donor),
+            maw,
+            digest_options=DigestOptions(cache_root=tmp_path / "cache"),
+            record_ledger=False,
+        )
+        assert result.meal_dir is not None
+        path = initialize(result.meal_dir, PLAN, maw=maw) / "snapshot.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    dirty = snapshot()
+    (maw / ".crab.yml").write_text("ledger: none\nhunger:\n  code: false\n", encoding="utf-8")
+    policy = snapshot()
+    assert (
+        baseline["menu"]["maw"]["sha"]
+        == dirty["menu"]["maw"]["sha"]
+        == policy["menu"]["maw"]["sha"]
+    )
+    assert baseline["identities"]["maw_worktree"] != dirty["identities"]["maw_worktree"]
+    assert dirty["identities"]["policy"] != policy["identities"]["policy"]
+    assert (directory / "snapshot.json").read_text(encoding="utf-8")
 
 
 def test_receiving_adaptation_has_a_real_bounded_read_control() -> None:

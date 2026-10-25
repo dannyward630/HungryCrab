@@ -1322,6 +1322,41 @@ def test_fetched_unmanaged_notice_is_refused(tmp_path: Path, receipts: str | Non
         base_receipts_kept(prepared)(base.get)
 
 
+def test_unmanaged_notice_refusal_precedes_provider_and_ledger_effects(tmp_path: Path) -> None:
+    maw = _maw(tmp_path)
+    notice = maw / "THIRD_PARTY_NOTICES.md"
+    original = b"# Third-party notices\n\nA human-maintained legal notice.\n"
+    notice.write_bytes(original)
+    config = MawConfig(root=maw)
+    config.serve.prs = "auto"
+    ledger = Ledger(None)
+    provider_calls: list[str] = []
+
+    def preparer(card: Candidate, payload: str) -> PreparedPullRequest:
+        return _prepare(maw, payload)
+
+    def publisher(
+        card: Candidate, prepared: PreparedPullRequest, allow_create: bool
+    ) -> PullRequestPublication:
+        provider_calls.append(card.id)
+        raise AssertionError("provider must not be reached")
+
+    card = _card()
+    with pytest.raises(CrabError, match="did not write or was edited"):
+        serve_cleanroom_pull_requests(
+            [card],
+            {card.id: _payload()},
+            config=config,
+            ledger=ledger,
+            explicit_selection=True,
+            preparer=preparer,
+            publisher=publisher,
+            now=NOW,
+        )
+    assert notice.read_bytes() == original
+    assert provider_calls == [] and ledger.entries == {}
+
+
 def test_fetched_receipt_content_cannot_change_under_the_same_identity(tmp_path: Path) -> None:
     prepared = _prepare(_maw(tmp_path))
     records = parse_attributions(

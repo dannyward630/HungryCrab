@@ -156,7 +156,7 @@ def test_portable_file_inventory_ignores_recorded_runner_root(tmp_path: Path) ->
         {
             "app.py": "pass\n",
             ".github/dependabot.yml": "version: 2\nupdates: []\n",
-            "vendor/LICENSE": "Restricted foreign licence",
+            "other/LICENSE": "SPDX-License-Identifier: GPL-3.0-only\n",
         },
     )
     maw = repository(tmp_path / "maw", {"app.py": "pass\n"})
@@ -173,6 +173,8 @@ def test_portable_file_inventory_ignores_recorded_runner_root(tmp_path: Path) ->
         return [(c.id, c.license_mode, [e.path for e in c.evidence]) for c in result.candidates]
 
     assert facts(before) == facts(after)
+    dependabot = next(c for c in after.candidates if c.key == "tooling.dependabot")
+    assert dependabot.license_mode == "COPY"
     assert after.prey.find_files(".github/dependabot*") == [".github/dependabot.yml"]
     assert after.prey.find_files(".github/absent*") == []
     assert after.prey.evidence_capability == "inventory"

@@ -31,6 +31,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   distinguish issue lessons using source/issue facts without carrying commenter titles.
 - Recognize bounded ordinary MIT copyright metadata, preserving notices and refusing
   restrictive riders and unsupported operative text.
+- Exclude inert Python and JS/TS comment/string contents from architecture symbols and
+  imports, including nested templates; qualify ambiguous regex/JSX and lexical coverage.
 
 - Recognize explicit Python unittest invocations in CI, including versioned interpreters
   and uv wrappers, so stdlib projects do not receive a false missing-test-runner nutrient.

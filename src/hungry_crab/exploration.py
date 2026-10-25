@@ -215,9 +215,10 @@ def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
                 e.get("id")
                 for e in as_list(as_dict(ledger).get("entries"))
                 if isinstance(e, dict)
-                and e.get("status") in {"rejected", "accepted", "merged"}
+                and (e.get("feedback") or e.get("status")) in {"rejected", "accepted", "merged"}
                 and not e.get("exploration_review")
             ],
+            "memory": menu.get("memory"),
             "exploration_writes_learning": False,
         },
     }
