@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ctypes
 import subprocess
-import sys
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -72,9 +71,10 @@ class _ThreadEntry(ctypes.Structure):
 
 
 def _kernel() -> Any:
-    if sys.platform != "win32":
+    loader = getattr(ctypes, "WinDLL", None)
+    if loader is None:
         raise UsageError("native Windows acquisition requires Windows")
-    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api = loader("kernel32", use_last_error=True)
     signatures = {
         "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
         "CreateJobObjectW": ([ctypes.c_void_p, wintypes.LPCWSTR], wintypes.HANDLE),
@@ -128,7 +128,7 @@ def _kernel() -> Any:
 def _failure(action: str) -> UsageError:
     return UsageError(
         f"cannot establish Windows acquisition boundary: {action} "
-        f"(WinError {ctypes.get_last_error()})",
+        f"(WinError {getattr(ctypes, 'get_last_error', lambda: 0)()})",
         hint="use a dedicated fixed-capacity volume and an elevated terminal; "
         "acquisition has not started",
     )
