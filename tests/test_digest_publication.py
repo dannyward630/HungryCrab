@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from hungry_crab import digest_location
+from hungry_crab import digest_location, digest_publication
 from hungry_crab.digest_location import REF_SCHEMA, resolve_canonical_digest
 from hungry_crab.digest_publication import (
     DigestGeneration,
@@ -213,6 +214,143 @@ def test_publication_ref_is_a_regular_small_pointer_file(tmp_path: Path) -> None
     assert ref_path.is_file()
     assert resolve_canonical_digest(digests, SHA).path == generation.path
     assert not list(ref_path.parent.glob(f".{SHA}.*.tmp"))
+
+
+def test_generation_and_temp_ref_fsync_precede_ref_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digests = tmp_path / "digests"
+    generation = allocate_digest_generation(digests, SHA)
+    _write_artifact(generation.path, "complete")
+    (generation.path / "payload.json").write_text("extra artifact\n", encoding="utf-8")
+    events: list[str] = []
+    original_fsync = digest_publication.os.fsync
+    original_replace = Path.replace
+    refs_dir = digests / ".refs"
+    known_paths = {
+        "manifest": generation.path / "manifest.json",
+        "payload": generation.path / "payload.json",
+        "generation_dir": generation.path,
+        "sha_dir": generation.path.parent,
+        "generations_dir": generation.path.parent.parent,
+        "digests_dir": digests,
+        "refs_dir": refs_dir,
+    }
+
+    def tracked_fsync(fd: int) -> None:
+        opened = os.fstat(fd)
+        targets = [
+            name
+            for name, path in known_paths.items()
+            if path.exists() and os.path.samestat(opened, path.stat())
+        ]
+        targets.extend(
+            "temp_ref"
+            for path in refs_dir.glob(f".{SHA}.*.tmp")
+            if os.path.samestat(opened, path.stat())
+        )
+        assert len(targets) == 1, "each durability barrier must have a known descriptor"
+        events.append(targets[0])
+        original_fsync(fd)
+
+    def tracked_replace(self: Path, target: Path) -> Path:
+        if self.name.endswith(".tmp"):
+            events.append("replace")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(digest_publication.os, "fsync", tracked_fsync)
+    monkeypatch.setattr(Path, "replace", tracked_replace)
+
+    publish_digest_generation(digests, generation)
+
+    assert events.count("replace") == 1
+    switch = events.index("replace")
+    before, after = events[:switch], events[switch + 1 :]
+    for name in ("manifest", "payload", "temp_ref"):
+        assert before.count(name) == 1, f"{name} must be synced before ref switch"
+    if os.name != "nt":
+        for name in ("generation_dir", "sha_dir", "generations_dir"):
+            assert before.count(name) == 1, f"{name} must be synced before ref switch"
+        assert before.count("digests_dir") >= 2, "cache root must be synced after refs mkdir"
+        assert after == ["refs_dir"], "canonical refs directory must sync after replacement"
+    else:
+        assert not after, "Windows directory fsync is explicitly unsupported"
+    assert resolve_canonical_digest(digests, SHA).path == generation.path
+
+
+def test_generation_fsync_failure_does_not_switch_active_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digests = tmp_path / "digests"
+    before = allocate_digest_generation(digests, SHA)
+    _write_artifact(before.path, "before")
+    publish_digest_generation(digests, before)
+    after = allocate_digest_generation(digests, SHA)
+    _write_artifact(after.path, "after")
+
+    def unavailable_fsync(_fd: int) -> None:
+        raise OSError("simulated durability barrier failure")
+
+    monkeypatch.setattr(digest_publication.os, "fsync", unavailable_fsync)
+    with pytest.raises(CrabError, match="could not sync complete digest generation"):
+        publish_digest_generation(digests, after)
+
+    assert resolve_canonical_digest(digests, SHA).path == before.path
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory sync only")
+def test_late_parent_directory_sync_failure_preserves_active_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digests = tmp_path / "digests"
+    before = allocate_digest_generation(digests, SHA)
+    _write_artifact(before.path, "before")
+    publish_digest_generation(digests, before)
+    after = allocate_digest_generation(digests, SHA)
+    _write_artifact(after.path, "after")
+
+    original_sync_directory = digest_publication._sync_directory
+    root_sync_calls = 0
+
+    def refuse_second_root_sync(path: Path) -> None:
+        nonlocal root_sync_calls
+        if path == digests:
+            root_sync_calls += 1
+            if root_sync_calls == 2:
+                raise OSError("simulated late pre-switch directory sync failure")
+        original_sync_directory(path)
+
+    monkeypatch.setattr(digest_publication, "_sync_directory", refuse_second_root_sync)
+    with pytest.raises(CrabError, match="could not prepare digest refs root"):
+        publish_digest_generation(digests, after)
+
+    assert root_sync_calls == 2
+    assert resolve_canonical_digest(digests, SHA).path == before.path
+    assert not list((digests / ".refs").glob(f".{SHA}.*.tmp"))
+
+
+def test_post_switch_sync_failure_does_not_claim_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digests = tmp_path / "digests"
+    before = allocate_digest_generation(digests, SHA)
+    _write_artifact(before.path, "before")
+    publish_digest_generation(digests, before)
+    after = allocate_digest_generation(digests, SHA)
+    _write_artifact(after.path, "after")
+    original_sync_dir = digest_publication._sync_directory
+
+    def refuse_ref_directory_sync(path: Path) -> None:
+        if path.name == ".refs":
+            raise OSError("simulated directory sync failure")
+        original_sync_dir(path)
+
+    monkeypatch.setattr(digest_publication, "_sync_directory", refuse_ref_directory_sync)
+    with pytest.raises(CrabError, match="may already point"):
+        publish_digest_generation(digests, after)
+
+    assert resolve_canonical_digest(digests, SHA).path == after.path
+    assert not list((digests / ".refs").glob(f".{SHA}.*.tmp"))
 
 
 @LINK_KINDS
