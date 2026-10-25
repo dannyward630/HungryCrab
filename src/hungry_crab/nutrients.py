@@ -197,6 +197,16 @@ class Candidate:
                     f"Structured issue metadata for {source}, {kind} {number}. "
                     "Inspect the linked issues; commenter prose is not carried into this card."
                 )
+                facts = self.trace.get("issue_facts", {})
+                if isinstance(facts, dict):
+                    size, reactions = facts.get("size"), facts.get("reactions")
+                    if (
+                        type(size) is int
+                        and type(reactions) is int
+                        and 0 <= size <= 10**9
+                        and 0 <= reactions <= 10**9
+                    ):
+                        self.what = f"{size} issue(s), {reactions} reactions. " + self.what
                 return
             self.title = "Issue-derived demand signal"
             self.what = (

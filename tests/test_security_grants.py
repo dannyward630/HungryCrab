@@ -35,6 +35,8 @@ def test_bounded_mit_copyright_metadata(copyright: str) -> None:
         "Copyright (c) 2026 Jane Doe. Production use requires a paid licence.",
         "Copyright (c) Jane Doe Commercial Use Requires Permission",
         "Copyright (c) Jane Doe <commercial use requires permission>",
+        "Copyright (c) Commercial Use",
+        "Copyright (c) Paid Licence",
         "Copyright (c) 2017-present Jane Doe. Additional Grant: restricted use.",
     ],
 )

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .artifact_read import read_object
+from .artifact_read import read_bytes, read_object
 from .attribution import (
     GitSourceReader,
     MaterializationReceipt,
@@ -114,6 +114,21 @@ def _tool_identity() -> dict[str, str]:
     return {"version": __version__, "source_sha256": fingerprint(sources)}
 
 
+def _digest_identity(directory: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    artifacts = {}
+    total = 0
+    for item in as_list(manifest.get("files")):
+        name = as_dict(item).get("name")
+        if not isinstance(name, str) or Path(name).name != name or "/" in name or "\\" in name:
+            raise CrabError("digest identity contains an invalid artifact path")
+        payload = read_bytes(directory / name, 50_000_000)
+        total += len(payload)
+        if total > 256 * 1024 * 1024:
+            raise CrabError("digest identity exceeds the exploration read budget")
+        artifacts[name] = hashlib.sha256(payload).hexdigest()
+    return {"manifest": fingerprint(manifest), "artifacts": artifacts}
+
+
 def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
     """Freeze the actual inputs and original denominator before any semantic judgement."""
     menu = load_menu(meal_dir)
@@ -132,6 +147,7 @@ def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
     info = read_object(meal_dir / "meal.json")
     manifests: dict[str, Any] = {}
     file_evidence: dict[str, Any] = {}
+    digest_identities: dict[str, Any] = {}
     for side in ("prey", "maw"):
         directory = info.get(f"{side}_digest")
         if not isinstance(directory, str):
@@ -143,6 +159,7 @@ def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
         if as_dict(manifest.get("prey")).get("sha") != as_dict(menu.get(side)).get("sha"):
             raise CrabError(f"exploration {side} digest identity differs from the meal")
         manifests[side] = manifest
+        digest_identities[side] = _digest_identity(directory_path, manifest)
         inventory = read_object(directory_path / "inventory.json")
         file_evidence[side] = inventory.get("evidence_lines", {})
     current = GitRunner(maw)
@@ -162,7 +179,7 @@ def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
     identities = {
         "tool": _tool_identity(),
         "menu": fingerprint(menu),
-        "digests": {side: fingerprint(value) for side, value in manifests.items()},
+        "digests": digest_identities,
         "policy": hashlib.sha256(config.path.read_bytes()).hexdigest()
         if config.path.is_file()
         else fingerprint(config.raw),
@@ -188,6 +205,12 @@ def initialize(meal_dir: Path, plan: dict[str, Any], *, maw: Path) -> Path:
             "wiki": manifests["prey"].get("wiki"),
         },
         "learning_audit": {
+            "actual_learning_input_ids": [
+                e.get("id")
+                for e in as_list(as_dict(ledger).get("entries"))
+                if isinstance(e, dict)
+                and (e.get("feedback") or e.get("status")) in {"rejected", "accepted", "merged"}
+            ],
             "unverified_legacy_feedback": [
                 e.get("id")
                 for e in as_list(as_dict(ledger).get("entries"))
@@ -239,7 +262,9 @@ def events(directory: Path) -> list[dict[str, Any]]:
     return result
 
 
-def _references(value: object, side: dict[str, Any], files: dict[str, Any]) -> bool:
+def _references(
+    value: object, side: dict[str, Any], files: dict[str, Any], *, objects: str | None = None
+) -> bool:
     if not isinstance(value, list) or not value or len(value) > 20:
         return False
     for reference in value:
@@ -254,7 +279,11 @@ def _references(value: object, side: dict[str, Any], files: dict[str, Any]) -> b
             return False
         if type(start) is not int or type(end) is not int or not 1 <= start <= end <= start + 1000:
             return False
-        if type(files.get(path)) is not int or end > files[path]:
+        lines = files.get(path)
+        if lines is None and objects is not None:
+            text = GitSourceReader(Path(objects)).read(str(side.get("sha", "")), path)
+            lines = len(text.splitlines()) if text is not None else None
+        if type(lines) is not int or end > lines:
             return False
     return True
 
@@ -264,7 +293,12 @@ def _validate_record(data: dict[str, Any], record: dict[str, Any]) -> None:
         _text(record, key)
     kind = record.get("kind")
     menu = data["menu"]
-    source = _references(record.get("source_evidence"), menu["prey"], data["file_evidence"]["prey"])
+    source = _references(
+        record.get("source_evidence"),
+        menu["prey"],
+        data["file_evidence"]["prey"],
+        objects=menu["prey"].get("objects"),
+    )
     receiving = _references(record.get("maw_evidence"), menu["maw"], data["file_evidence"]["maw"])
     if kind == "facet":
         if (
@@ -453,9 +487,9 @@ def register(directory: Path, finding: dict[str, Any], *, source_repo: Path) -> 
             raise CrabError("behavior key must be stable and maw-relative: code.<behavior>")
         source, receiving = finding.get("source_evidence"), finding.get("maw_evidence")
         menu = data["menu"]
-        if not _references(source, menu["prey"], data["file_evidence"]["prey"]) or not _references(
-            receiving, menu["maw"], data["file_evidence"]["maw"]
-        ):
+        if not _references(
+            source, menu["prey"], data["file_evidence"]["prey"], objects=str(source_repo)
+        ) or not _references(receiving, menu["maw"], data["file_evidence"]["maw"]):
             raise CrabError("registration requires valid immutable donor and receiving file ranges")
         assert isinstance(source, list) and isinstance(receiving, list)
         prey_ref = SourceRef.from_dict(menu["prey"])

@@ -15,6 +15,7 @@ from ..mdutil import MdDoc
 from ..safety import safe_name
 from ..typeutil import as_dict, as_list
 from .base import MineContext, MinerResult
+from .ci_tools import TEST_TOOLS
 
 WORKFLOW_DIR = ".github/workflows/"
 _ACTION_RE = re.compile(r"^(?P<repo>[\w.-]+/[\w.-]+)(?P<path>/[^@\s]+)?@(?P<ref>\S+)$")
@@ -528,10 +529,17 @@ def parse_workflow(
                         run, scripts or {} if directory in (".", "./", "") else {}
                     )
                     unresolved_scripts.update(unresolved)
+                    step_tools: set[str] = set()
                     for command in commands:
                         for name, pattern in TOOL_PATTERNS:
                             if pattern.search(command):
-                                tools.add(name)
+                                step_tools.add(name)
+                    if "npm test" in step_tools and not step_tools & (TEST_TOOLS - {"npm test"}):
+                        step_tools.remove("npm test")
+                        unresolved_scripts.add(
+                            "package test entrypoint has no established test tool"
+                        )
+                    tools.update(step_tools)
                     for name, pattern in COVERAGE_FLAGS:
                         if pattern.search(run):
                             coverage_flags.add(name)

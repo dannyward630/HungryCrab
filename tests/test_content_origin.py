@@ -14,6 +14,36 @@ from hungry_crab.digest import DigestOptions
 from hungry_crab.licensing import ContentOrigin, Mode, cap_mode_for_origin
 from hungry_crab.nutrients import Candidate, Evidence, merge_notes
 
+
+@pytest.mark.parametrize("prey", ["pypa-pipx", "anthropics-skills", "github-linguist-linguist"])
+def test_frozen_issue_cards_have_distinct_safe_titles_and_cluster_links(
+    prey: str, tmp_path: Path
+) -> None:
+    from hungry_crab.compare import CompareOptions, compare_digests, write_meal
+    from hungry_crab.ledger import Ledger
+    from hungry_crab.maw import MawConfig
+    from hungry_crab.serve import ServeOptions, serve
+
+    root = Path(__file__).parents[1] / "benchmarks/menu"
+    result = compare_digests(
+        root / "prey" / prey, root / "maw", options=CompareOptions(allow_partial=True)
+    )
+    cards = [card for card in result.candidates if card.category == "issue-lesson"]
+    assert len(cards) >= 2 and len({card.title for card in cards}) == len(cards)
+    assert all(card.evidence for card in cards if ".cluster-" in card.key)
+    assert all(card.license_mode in {"IDEAS_ONLY", "HUMAN"} for card in cards)
+    output = tmp_path / "meal"
+    write_meal(result, output)
+    preview = serve(
+        output,
+        tmp_path,
+        ServeOptions(ids=[card.id for card in cards[:2]], mode="dry-run"),
+        config=MawConfig(root=tmp_path),
+        ledger=Ledger(None),
+    )
+    assert len({item["title"] for item in preview.previews}) == 2
+
+
 SENTINEL = "COMMENTER_SENTINEL_DO_NOT_COPY"
 
 

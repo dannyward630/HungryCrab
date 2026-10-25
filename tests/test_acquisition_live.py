@@ -77,10 +77,11 @@ def test_real_https_git_quota_cancellation_and_cache_preservation(
 
     def fixture_tls(self: AcquisitionBudget, base: dict[str, str]) -> dict[str, str]:
         env = git_environment(self, base)
-        count = int(env["GIT_CONFIG_COUNT"])
-        env[f"GIT_CONFIG_KEY_{count}"] = "http.sslBackend"
-        env[f"GIT_CONFIG_VALUE_{count}"] = "openssl"
-        env["GIT_CONFIG_COUNT"] = str(count + 1)
+        if os.name == "nt":
+            count = int(env["GIT_CONFIG_COUNT"])
+            env[f"GIT_CONFIG_KEY_{count}"] = "http.sslBackend"
+            env[f"GIT_CONFIG_VALUE_{count}"] = "openssl"
+            env["GIT_CONFIG_COUNT"] = str(count + 1)
         return env
 
     monkeypatch.setattr(AcquisitionBudget, "git_env", fixture_tls)

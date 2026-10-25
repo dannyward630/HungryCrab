@@ -219,6 +219,9 @@ class TraitsMiner:
         instruction_tools = {g["tool"] for g in ai["instruction_files"]}
         dependabot_updates = as_dict(ci.get("dependabot")).get("updates", [])
         ci_tools = set(features["tools"])
+        ci_commands_unknown = any(
+            workflow.get("unresolved_scripts") for workflow in ci.get("workflows", [])
+        )
         workspace_manifest = any(
             m["path"].startswith(("packages/", "apps/", "crates/")) for m in inventory["manifests"]
         )
@@ -261,8 +264,17 @@ class TraitsMiner:
             "ci_windows_runner": features["windows_runner"],
             "ci_macos_runner": features["macos_runner"],
             "ci_tools": features["tools"],
-            "ci_runs_tests": bool(ci_tools & _TEST_TOOLS),
-            "ci_runs_lint": bool(ci_tools & _LINT_TOOLS),
+            "ci_runs_tests": True
+            if ci_tools & _TEST_TOOLS
+            else None
+            if ci_commands_unknown
+            else False,
+            "ci_runs_lint": True
+            if ci_tools & _LINT_TOOLS
+            else None
+            if ci_commands_unknown
+            else False,
+            "ci_commands_unknown": ci_commands_unknown,
             "ci_pipe_to_shell": features["pipe_to_shell_steps"] > 0,
             # tooling
             "has_dependabot": features["dependabot"],

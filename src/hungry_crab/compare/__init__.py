@@ -241,9 +241,11 @@ def compare_digests(
             "ecosystems": sorted(prey.ecosystems),
             "runtime_ecosystems": sorted(prey.compatible_ecosystems - prey.ecosystems),
             "evidence_capability": prey.evidence_capability,
+            "objects": str(prey_objects.resolve()) if prey_objects is not None else None,
         },
         "maw": {
             "label": maw.label,
+            "url": maw.url,
             "sha": maw.sha,
             "license": maw_spdx,
             "ecosystems": sorted(maw.ecosystems),

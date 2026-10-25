@@ -297,6 +297,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--json", action="store_true", help="print menu.json")
     p_compare.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="read the existing ledger snapshot without recording this comparison",
+    )
+    p_compare.add_argument(
         "--prey-digest",
         type=Path,
         help="verified public donor digest artifact; compare locally without acquisition",
@@ -773,6 +778,7 @@ def cmd_compare(args: argparse.Namespace, log: Callable[[str], None]) -> int:
         allow_partial=args.allow_partial,
         prey_digest_dir=args.prey_digest,
         prey_objects=args.prey_objects,
+        record_ledger=not args.no_ledger,
     )
     if args.json:
         print(json.dumps(result.menu, indent=2, ensure_ascii=False))

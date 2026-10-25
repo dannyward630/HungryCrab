@@ -33,6 +33,9 @@ digest-out/
 .crab/prey-backlog.md
 .crab/researcher-prompt.md
 
+# This pilot's private maw identity and PR follow-up evidence stay local.
+/.crab/experiments/mit-transfer-2026-10-25/
+
 # Loop OS-lock carriers are machine-local; commit loop JSON snapshots instead.
 .crab/*.lock
 .crab/loops/*.lock

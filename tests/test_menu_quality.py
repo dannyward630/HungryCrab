@@ -134,7 +134,7 @@ def test_issue_clusters_are_capped_without_carrying_commenter_text() -> None:
             "clusters": [*clusters, {"size": 2, "terms": ["tiny"], "sample_titles": []}],
             "top_by_reactions": [
                 {"number": n, "title": f"issue {n}", "reactions": 50, "state": "open"}
-                for n in range(6)
+                for n in range(1, 7)
             ],
         },
     )
@@ -143,7 +143,8 @@ def test_issue_clusters_are_capped_without_carrying_commenter_text() -> None:
     clustered = [c for c in out if "cluster-" in c.key]
     assert len(clustered) == MAX_ISSUE_CLUSTERS
     assert len(out) == MAX_ISSUE_CLUSTERS + MAX_TOP_ISSUES
-    assert clustered[0].title == "Issue-derived demand signal"
+    assert clustered[0].title == "Recurring issue theme 1 in prey"
+    assert len({c.title for c in out}) == len(out)
     assert "pipx install fails" not in clustered[0].what
     assert "term0, install" not in clustered[0].what
     assert clustered[0].prey_state == "30 issues, 0 reactions"
@@ -158,6 +159,6 @@ def test_a_cluster_without_sample_titles_still_does_not_carry_terms() -> None:
         issues={"available": True, "clusters": [{"size": 9, "terms": ["windows", "path"]}]},
     )
     out = issue_candidates(prey, side("maw", {}))
-    assert out[0].title == "Issue-derived demand signal"
+    assert out[0].title == "Recurring issue theme 1 in prey"
     assert "windows" not in out[0].what
     assert "path" not in out[0].what

@@ -415,6 +415,8 @@ def trait_rule_candidates(prey: Side, maw: Side) -> list[Candidate]:
     for rule in TRAIT_RULES:
         prey_value = prey.trait(rule.trait)
         maw_value = maw.trait(rule.trait)
+        if rule.trait in {"ci_runs_tests", "ci_runs_lint"} and maw_value is None:
+            continue  # Unresolved script evidence is unknown, not a proven missing step.
         if rule.key == "docs.directory":
             # Preserve the stable nutrient id while treating a wiki as documentation too.
             prey_value = prey_value or prey.trait("has_wiki")
@@ -945,6 +947,7 @@ def issue_candidates(prey: Side, maw: Side) -> list[Candidate]:
                 category="issue-lesson",
                 origin=ContentOrigin.COMMENTERS.value,
                 key=f"issue-lesson.{slug}.cluster-{index}",
+                trace={"issue_facts": {"size": size, "reactions": data.get("reactions", 0)}},
                 title=f"Recurring issue theme {index} in {slug}",
                 what=f"{size} issues in cluster {index}",
                 prey_state=f"{size} issues, {data.get('reactions') or 0} reactions",
@@ -967,11 +970,14 @@ def issue_candidates(prey: Side, maw: Side) -> list[Candidate]:
         if not isinstance(reactions, int) or reactions < 20 or is_suspicious(title):
             continue
         number = data.get("number")
+        if type(number) is not int or number <= 0:
+            continue
         out.append(
             Candidate(
                 category="issue-lesson",
                 origin=ContentOrigin.COMMENTERS.value,
                 key=f"issue-lesson.{slug}.top-{number}",
+                trace={"issue_facts": {"size": 1, "reactions": reactions}},
                 title=f"Popular request in {prey.label}: {title[:80]}",
                 what=f"issue #{number} has {reactions} reactions",
                 prey_state=f"{reactions} reactions",

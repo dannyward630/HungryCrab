@@ -47,7 +47,7 @@ jobs:
         if: always() && steps.volume.outputs.root != ''
         env:
           CRAB_QUOTA_ROOT: ${{ steps.volume.outputs.root }}
-        run: uv run python scripts/acquisition_volume.py cleanup "$CRAB_QUOTA_ROOT"
+        run: uv run python scripts/acquisition_volume.py cleanup
   lint:
     name: Lint and type-check
     runs-on: ubuntu-latest

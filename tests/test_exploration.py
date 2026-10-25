@@ -26,7 +26,10 @@ PLAN = {
     "donor_policy": "MIT-only",
 }
 BUFFERED = "def consume(stream):\n    return stream.read()\n"
-STREAMING = "def consume(stream):\n    for chunk in iter(lambda: stream.read(4096), b''):\n        yield chunk\n"
+STREAMING = (
+    "def consume(stream):\n"
+    "    for chunk in iter(lambda: stream.read(4096), b''):\n        yield chunk\n"
+)
 
 
 def pair(
@@ -35,7 +38,9 @@ def pair(
     donor = repository(
         tmp_path / "donor",
         {
-            "reader.py": "def blocks(stream):\n    while chunk := stream.read(1024):\n        yield chunk\n"
+            "reader.py": (
+                "def blocks(stream):\n    while chunk := stream.read(1024):\n        yield chunk\n"
+            )
         },
     )
     maw = repository(

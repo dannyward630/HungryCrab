@@ -198,6 +198,12 @@ or `--shallow` (default branch, tree only).
 
 ## Feeder: a menu in CI
 
+For broader goals, use [supervised discovery](docs/discovery.md): `crab explore` freezes
+comparison inputs, records source/maw hypotheses and registers non-trait behavior nutrients
+under existing licence, origin and hunger guards. A structural menu is an index; zero cards
+does not establish NO_GAP. [Bounded local acquisition](docs/acquisition.md) covers Linux
+volumes and native Windows VHD/Job Object prerequisites.
+
 Run `crab eat <local-repo> --deterministic --maw . --no-wiki` to export a complete meal
 without a model, issue creation or ledger writes. Remote Feeder acquisition requires a dedicated
 quota volume and a shared byte allowance. The [Feeder guide](docs/feeder.md) shows the composite action,
@@ -277,7 +283,7 @@ hunger:                    # per nutrient category: true | false | issues-only |
   history-lesson: true
   issue-lesson: true
   architecture: issues-only
-  code: ideas-only         # produced by nothing until 0.4's postponed syntax index: inert
+  code: ideas-only         # source-linked behavior findings from crab explore register
 ignore: []                 # globs excluded from this repository's own digest, so that test
                            # fixtures and vendored trees are not mistaken for your code, e.g.
                            # [tests/fixtures/**, examples/**]. Patterns are case-sensitive on
