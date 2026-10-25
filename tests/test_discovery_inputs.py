@@ -226,3 +226,15 @@ def test_partial_and_unavailable_inventories_remain_explicit() -> None:
     assert side.evidence_capability == "unavailable"
     side.inventory = {"evidence_files": [".github/dependabot.yml"], "coverage": {"healthy": False}}
     assert side.evidence_capability == "partial-inventory"
+
+
+def test_recursive_portable_evidence_glob_includes_root_and_is_case_sensitive() -> None:
+    side = Side(label="public", sha="a" * 40, url=None, root=None)
+    side.inventory = {
+        "evidence_files": ["CODEOWNERS", ".github/CODEOWNERS", "a/b/CODEOWNERS", "codeowners"]
+    }
+    assert side.find_files("**/CODEOWNERS", limit=10) == [
+        ".github/CODEOWNERS",
+        "CODEOWNERS",
+        "a/b/CODEOWNERS",
+    ]

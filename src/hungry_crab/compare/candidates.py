@@ -240,13 +240,26 @@ def _evidence_path(path: str) -> bool:
 
 
 def _match_evidence_path(path: str, pattern: str) -> bool:
-    # Match components like Path.glob: '*' must not swallow another directory.
+    # POSIX component semantics on every runner, including zero-directory '**'.
     parts, patterns = path.split("/"), pattern.split("/")
-    if "**" in patterns:
-        return Path(path).match(pattern)
-    return len(parts) == len(patterns) and all(
-        fnmatch.fnmatchcase(part, rule) for part, rule in zip(parts, patterns, strict=True)
-    )
+    pending = [(0, 0)]
+    seen: set[tuple[int, int]] = set()
+    while pending:
+        pi, si = pending.pop()
+        if (pi, si) in seen:
+            continue
+        seen.add((pi, si))
+        if pi == len(patterns):
+            if si == len(parts):
+                return True
+            continue
+        if patterns[pi] == "**":
+            pending.append((pi + 1, si))
+            if si < len(parts):
+                pending.append((pi, si + 1))
+        elif si < len(parts) and fnmatch.fnmatchcase(parts[si], patterns[pi]):
+            pending.append((pi + 1, si + 1))
+    return False
 
 
 def _snapshot_files(objects: Path, sha: str, manifest: dict[str, Any]) -> list[str]:
