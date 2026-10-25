@@ -16,6 +16,33 @@ MIT = (Path(__file__).parents[1] / "LICENSE").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
+    "copyright",
+    [
+        "Copyright (c) 2017-present Jane Doe",
+        "Copyright (c) Jane Doe",
+        "Copyright (c) Jane Doe 2017",
+        "Copyright (c) 2017 Jane Doe <jane @example.com>",
+    ],
+)
+def test_bounded_mit_copyright_metadata(copyright: str) -> None:
+    text = MIT.replace("Copyright (c) 2026 Dreven", copyright)
+    assert detect_from_text(text) == ("MIT", 0.99)
+
+
+@pytest.mark.parametrize(
+    "copyright",
+    [
+        "Copyright (c) 2026 Jane Doe. Production use requires a paid licence.",
+        "Copyright (c) Jane Doe Commercial Use Requires Permission",
+        "Copyright (c) Jane Doe <commercial use requires permission>",
+        "Copyright (c) 2017-present Jane Doe. Additional Grant: restricted use.",
+    ],
+)
+def test_supported_metadata_cannot_hide_restrictive_riders(copyright: str) -> None:
+    assert detect_from_text(MIT.replace("Copyright (c) 2026 Dreven", copyright))[0] is None
+
+
+@pytest.mark.parametrize(
     "rider",
     [
         "The Software shall be used for Good, not Evil.",
