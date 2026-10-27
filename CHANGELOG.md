@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Recognize holder-linked parenthesized account handles in MIT copyright notices,
+  including Devostasis' `Dreven (drevendev)`, while rejecting unrelated aliases,
+  restrictive preambles and riders for human review.
+
 ## [0.6.6] - 2026-10-26
 
 ### Fixed
