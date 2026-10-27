@@ -62,7 +62,8 @@ client-provided roots and tool arguments cannot expand them. The analysis cache 
 the approved source roots; choose it with global `--cache-dir` before `mcp` if needed.
 
 - `crab_digest(prey, depth="normal", page=null)` returns a manifest, coverage and available
-  Markdown page names. Supply one listed `page` to read that page; JSON miner bodies are not
+  Markdown page names. First call without `page`, then supply one listed `page` to read it;
+  a page request requires the still-valid session snapshot, including after eviction. JSON miner bodies are not
   exposed as arbitrary file reads. Failed/blocked or damaged producer evidence is refused.
 - `crab_menu(prey, maw, offset=0, limit=15, category=null)` compares with a local maw, respecting
   its licence, hunger, memory and existing ledger decisions. `limit` is 1–100. Follow
@@ -198,6 +199,17 @@ than silently disappearing. A new output is created without replacing an existin
 `--force` explicitly replaces only a regular `.html` file. Rendering never changes its source.
 
 ## Reproduce the installation acceptance
+
+MCP paging reuses a bounded server-session snapshot (eight entries, up to 60 seconds). Source
+HEAD/worktree/refs/shallow boundary, acquired API/wiki evidence, receiving policy/ledger, tool
+identity and freshness are rechecked; digest artifacts are verified on hits. Changed, damaged,
+expired or evicted menu snapshots refuse continuation with a restart-at-offset-0 hint. Digest
+clients relist pages without `page` after invalidation. Responses expose snapshot id/as-of/reuse.
+New analyses force fresh evidence within MCP; this does not make shallow digests canonical or
+change global digest reuse. Unknown non-Git identity cannot support a reusable snapshot. No
+deepening/fetch on invalidation, source/ledger writes or CLI meal replacement is introduced.
+Initial operator-opted-in acquisition keeps its existing bounded path. Visibility
+refusals identify the affected side and recovery direction; deep-menu support stays separate.
 
 ```sh
 uv sync --locked --all-extras
