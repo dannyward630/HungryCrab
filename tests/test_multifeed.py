@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from hungry_crab.cache import Slug, Target
+from hungry_crab.cache import Slug, Target, prey_paths
 from hungry_crab.cli import main
 from hungry_crab.errors import CrabError, UsageError
 from hungry_crab.feeder import EatOptions, EatResult
 from hungry_crab.multifeed import eat_many, load_multi, merge_menus
 from hungry_crab.nutrients import Candidate
+
+
+@contextmanager
+def fake_acquisition_scope(*_args: object) -> Iterator[None]:
+    """Skip the remote quota guard when a test replaces acquisition with a fixture."""
+    yield None
 
 
 def menu(prey: str, mode: str = "COPY", *, sha: str = "a", score: float = 0.7) -> dict[str, Any]:
@@ -71,8 +80,19 @@ def fake_eat(prey: Target, maw: Path, options: EatOptions, **_: Any) -> EatResul
     assert options.out is not None
     options.out.mkdir()
     data = menu(prey.label, sha="a" * 40)
+    if prey.slug is not None:
+        data["prey"]["url"] = prey.slug.url
+        prey_root = prey_paths(prey.slug, options.cache_root).repo
+    else:
+        assert prey.path is not None
+        prey_root = prey.path
     data["maw"]["root"] = str(maw.resolve())
     (options.out / "menu.json").write_text(json.dumps(data), encoding="utf-8")
+    digest = options.out / "prey-digest"
+    digest.mkdir()
+    (digest / "manifest.json").write_text(
+        json.dumps({"prey": {"root": str(prey_root)}}), encoding="utf-8"
+    )
     return EatResult(options.out, {"prey": data["prey"]})
 
 
@@ -104,6 +124,109 @@ def test_atomic_bundle_integrity_and_cli_menu(
     (next(iter(paths.values())) / "menu.json").write_text("{}", encoding="utf-8")
     with pytest.raises(CrabError, match="integrity"):
         load_multi(result.out_dir)
+
+
+def test_multi_bundle_preserves_slug_case_and_hashes_normalized_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maw = tmp_path / "maw"
+    maw.mkdir()
+    monkeypatch.setattr("hungry_crab.multifeed.eat", fake_eat)
+    monkeypatch.setattr("hungry_crab.multifeed.acquisition_scope", fake_acquisition_scope)
+    result = eat_many(
+        [
+            Target(slug=Slug.parse("Owner/MixedRepo")),
+            Target(slug=Slug.parse("Other/SecondRepo")),
+        ],
+        maw,
+        EatOptions(out=tmp_path / "bundle", cache_root=tmp_path / "cache"),
+    )
+
+    manifest = json.loads((result.out_dir / "feeder.json").read_text(encoding="utf-8"))
+    source = next(row for row in manifest["sources"] if row["target"]["value"] == "Owner/MixedRepo")
+    identity = "owner/mixedrepo"
+    assert source["identity"] == identity
+    assert source["id"] == hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    assert source["target"] == {"kind": "slug", "value": "Owner/MixedRepo"}
+
+    _menu, _paths, targets = load_multi(result.out_dir)
+    assert targets[source["id"]] == Target(slug=Slug.parse("Owner/MixedRepo"))
+
+
+def test_multi_bundle_rejects_case_only_slug_retargeting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maw = tmp_path / "maw"
+    maw.mkdir()
+    monkeypatch.setattr("hungry_crab.multifeed.eat", fake_eat)
+    monkeypatch.setattr("hungry_crab.multifeed.acquisition_scope", fake_acquisition_scope)
+    result = eat_many(
+        [
+            Target(slug=Slug.parse("Owner/MixedRepo")),
+            Target(slug=Slug.parse("Other/SecondRepo")),
+        ],
+        maw,
+        EatOptions(out=tmp_path / "bundle", cache_root=tmp_path / "cache"),
+    )
+    manifest_path = result.out_dir / "feeder.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    source = next(row for row in manifest["sources"] if row["target"]["value"] == "Owner/MixedRepo")
+    source["target"]["value"] = "owner/mixedrepo"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CrabError, match="does not match source menu"):
+        load_multi(result.out_dir)
+
+
+def test_multi_bundle_rejects_source_id_that_does_not_hash_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maw = tmp_path / "maw"
+    maw.mkdir()
+    monkeypatch.setattr("hungry_crab.multifeed.eat", fake_eat)
+    monkeypatch.setattr("hungry_crab.multifeed.acquisition_scope", fake_acquisition_scope)
+    result = eat_many(
+        [
+            Target(slug=Slug.parse("Owner/MixedRepo")),
+            Target(slug=Slug.parse("Other/SecondRepo")),
+        ],
+        maw,
+        EatOptions(out=tmp_path / "bundle", cache_root=tmp_path / "cache"),
+    )
+    manifest_path = result.out_dir / "feeder.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["sources"][0]["identity"] = "other/identity"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CrabError, match="source id does not match identity"):
+        load_multi(result.out_dir)
+
+
+def test_multi_bundle_v1_reconstructs_slug_from_source_menu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maw = tmp_path / "maw"
+    maw.mkdir()
+    monkeypatch.setattr("hungry_crab.multifeed.eat", fake_eat)
+    monkeypatch.setattr("hungry_crab.multifeed.acquisition_scope", fake_acquisition_scope)
+    result = eat_many(
+        [
+            Target(slug=Slug.parse("Owner/MixedRepo")),
+            Target(slug=Slug.parse("Other/SecondRepo")),
+        ],
+        maw,
+        EatOptions(out=tmp_path / "bundle", cache_root=tmp_path / "cache"),
+    )
+    manifest_path = result.out_dir / "feeder.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema"] = "hungry-crab.feeder-multi/1"
+    for source in manifest["sources"]:
+        source["target"] = source.pop("identity")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    _menu, _paths, targets = load_multi(result.out_dir)
+    source = next(row for row in manifest["sources"] if row["target"] == "owner/mixedrepo")
+    assert targets[source["id"]] == Target(slug=Slug.parse("Owner/MixedRepo"))
 
 
 def test_colliding_local_prey_labels_are_rejected_before_acquisition(
@@ -198,7 +321,7 @@ def test_real_multi_feeder_retains_verified_digests_and_dry_run_serving(
     ]
     assert main(args) == 0
     result = json.loads(capsys.readouterr().out)
-    assert result["schema"] == "hungry-crab.feeder-multi/1"
+    assert result["schema"] == "hungry-crab.feeder-multi/2"
     merged, paths, _ = load_multi(out)
     assert len(paths) == 2 and merged["candidates"]
     for path in paths.values():
