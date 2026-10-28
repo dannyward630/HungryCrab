@@ -279,5 +279,5 @@ def test_serve_many_uses_recorded_slug_path_despite_shadow_local_directory(
         cache_root=cache,
     )
 
-    assert observed == [prey_paths(prey_slug, cache).repo]
+    assert [str(path) for path in observed] == [str(prey_paths(prey_slug, cache).repo)]
     assert observed[0] != shadow
