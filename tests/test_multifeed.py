@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -250,8 +251,10 @@ def test_multi_bundle_rejects_source_id_that_does_not_hash_identity(
         load_multi(result.out_dir)
 
 
+@pytest.mark.parametrize("pre_context_aggregate", [False, True])
 def test_multi_bundle_v1_preserves_receiving_context_and_recovers_slug_case(
     tmp_path: Path,
+    pre_context_aggregate: bool,
 ) -> None:
     context = {
         "sha": "m" * 40,
@@ -281,10 +284,18 @@ def test_multi_bundle_v1_preserves_receiving_context_and_recovers_slug_case(
     saved = legacy_v1_bundle(bundle, sources)
     assert saved["receiving_context"] == context
     assert saved["receiving_context_status"] == "observed"
+    if pre_context_aggregate:
+        saved.pop("receiving_context")
+        saved.pop("receiving_context_status")
+        (bundle / "menu.json").write_text(json.dumps(saved), encoding="utf-8")
 
     merged, _paths, targets = load_multi(bundle)
-    assert merged["receiving_context"] == context
-    assert merged["receiving_context_status"] == "observed"
+    if pre_context_aggregate:
+        assert "receiving_context" not in merged
+        assert "receiving_context_status" not in merged
+    else:
+        assert merged["receiving_context"] == context
+        assert merged["receiving_context_status"] == "observed"
     for slug in slugs:
         source_id = hashlib.sha256(str(slug).casefold().encode("utf-8")).hexdigest()[:20]
         assert targets[source_id] == Target(slug=slug)
@@ -300,7 +311,7 @@ def test_multi_bundle_v1_relative_local_target_fails_closed_after_cwd_changes(
     monkeypatch.chdir(producer)
 
     relative_target = Path("project")
-    local_identity = str(relative_target.resolve())
+    local_identity = os.path.normcase(str(relative_target.resolve()))
     local_menu = menu("project")
     context = {"sha": "m" * 40, "selected_ref": "main", "root": "/maw", "worktree": "/maw"}
     local_menu["receiving_context"] = context
