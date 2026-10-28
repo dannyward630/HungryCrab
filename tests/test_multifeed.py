@@ -96,6 +96,54 @@ def fake_eat(prey: Target, maw: Path, options: EatOptions, **_: Any) -> EatResul
     return EatResult(options.out, {"prey": data["prey"]})
 
 
+def legacy_v1_bundle(root: Path, sources: list[tuple[str, dict[str, Any], str]]) -> dict[str, Any]:
+    """Write the version 1 on-disk shape directly, as the pre-v2 writer did."""
+    from hungry_crab.multifeed import _fingerprints
+
+    root.mkdir(parents=True)
+    (root / "sources").mkdir()
+    source_menus: dict[str, dict[str, Any]] = {}
+    rows = []
+    for target, source_menu, digest_root in sorted(sources, key=lambda row: row[0]):
+        source_id = hashlib.sha256(target.encode("utf-8")).hexdigest()[:20]
+        source = root / "sources" / source_id
+        (source / "prey-digest").mkdir(parents=True)
+        (source / "menu.json").write_text(json.dumps(source_menu), encoding="utf-8")
+        (source / "prey-digest" / "manifest.json").write_text(
+            json.dumps({"prey": {"root": digest_root}}), encoding="utf-8"
+        )
+        rows.append(
+            {
+                "id": source_id,
+                "path": f"sources/{source_id}",
+                "target": target,
+                "prey": source_menu["prey"],
+                "files": _fingerprints(source),
+            }
+        )
+        source_menus[source_id] = source_menu
+
+    aggregate = merge_menus(source_menus)
+    (root / "menu.json").write_text(
+        json.dumps(aggregate, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (root / "feeder.json").write_text(
+        json.dumps(
+            {
+                "schema": "hungry-crab.feeder-multi/1",
+                "maw": aggregate["maw"],
+                "counts": aggregate["counts"],
+                "sources": rows,
+                "side_effects": {"issues_created": 0, "ledger_written": False},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return aggregate
+
+
 def test_atomic_bundle_integrity_and_cli_menu(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -202,31 +250,92 @@ def test_multi_bundle_rejects_source_id_that_does_not_hash_identity(
         load_multi(result.out_dir)
 
 
-def test_multi_bundle_v1_reconstructs_slug_from_source_menu(
+def test_multi_bundle_v1_preserves_receiving_context_and_recovers_slug_case(
+    tmp_path: Path,
+) -> None:
+    context = {
+        "sha": "m" * 40,
+        "selected_ref": "main",
+        "root": "/maw",
+        "worktree": "/maw",
+    }
+    slugs = [Slug.parse("Owner/MixedRepo"), Slug.parse("Other/SecondRepo")]
+    sources = []
+    for slug in slugs:
+        source_menu = menu(str(slug))
+        source_menu["prey"]["url"] = slug.url
+        source_menu["receiving_context"] = context
+        source_menu["analysis_inputs"] = {
+            "policy": {"mode": "normal"},
+            "ledger": {"entries": []},
+        }
+        sources.append(
+            (
+                str(slug).casefold(),
+                source_menu,
+                str(prey_paths(slug, tmp_path / "cache").repo),
+            )
+        )
+
+    bundle = tmp_path / "legacy-bundle"
+    saved = legacy_v1_bundle(bundle, sources)
+    assert saved["receiving_context"] == context
+    assert saved["receiving_context_status"] == "observed"
+
+    merged, _paths, targets = load_multi(bundle)
+    assert merged["receiving_context"] == context
+    assert merged["receiving_context_status"] == "observed"
+    for slug in slugs:
+        source_id = hashlib.sha256(str(slug).casefold().encode("utf-8")).hexdigest()[:20]
+        assert targets[source_id] == Target(slug=slug)
+
+
+def test_multi_bundle_v1_relative_local_target_fails_closed_after_cwd_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    maw = tmp_path / "maw"
-    maw.mkdir()
-    monkeypatch.setattr("hungry_crab.multifeed.eat", fake_eat)
-    monkeypatch.setattr("hungry_crab.multifeed.acquisition_scope", fake_acquisition_scope)
-    result = eat_many(
-        [
-            Target(slug=Slug.parse("Owner/MixedRepo")),
-            Target(slug=Slug.parse("Other/SecondRepo")),
-        ],
-        maw,
-        EatOptions(out=tmp_path / "bundle", cache_root=tmp_path / "cache"),
-    )
-    manifest_path = result.out_dir / "feeder.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["schema"] = "hungry-crab.feeder-multi/1"
-    for source in manifest["sources"]:
-        source["target"] = source.pop("identity")
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    producer = tmp_path / "producer"
+    (producer / "project").mkdir(parents=True)
+    consumer = tmp_path / "consumer"
+    consumer.mkdir()
+    monkeypatch.chdir(producer)
 
-    _menu, _paths, targets = load_multi(result.out_dir)
-    source = next(row for row in manifest["sources"] if row["target"] == "owner/mixedrepo")
-    assert targets[source["id"]] == Target(slug=Slug.parse("Owner/MixedRepo"))
+    relative_target = Path("project")
+    local_identity = str(relative_target.resolve())
+    local_menu = menu("project")
+    context = {"sha": "m" * 40, "selected_ref": "main", "root": "/maw", "worktree": "/maw"}
+    local_menu["receiving_context"] = context
+    local_menu["analysis_inputs"] = {
+        "policy": {"mode": "normal"},
+        "ledger": {"entries": []},
+    }
+
+    remote_slug = Slug.parse("Other/RemoteRepo")
+    remote_menu = menu(str(remote_slug))
+    remote_menu["prey"]["url"] = remote_slug.url
+    remote_menu["receiving_context"] = context
+    remote_menu["analysis_inputs"] = {
+        "policy": {"mode": "normal"},
+        "ledger": {"entries": []},
+    }
+    bundle = tmp_path / "legacy-relative-bundle"
+    legacy_v1_bundle(
+        bundle,
+        [
+            (local_identity, local_menu, str(relative_target)),
+            (
+                str(remote_slug).casefold(),
+                remote_menu,
+                str(prey_paths(remote_slug, tmp_path / "cache").repo),
+            ),
+        ],
+    )
+
+    # The old writer stored an absolute target identity but a relative digest root.
+    local_id = hashlib.sha256(local_identity.encode("utf-8")).hexdigest()[:20]
+    assert load_multi(bundle)[2][local_id] == Target(path=Path(local_identity))
+    monkeypatch.chdir(consumer)
+    with pytest.raises(CrabError, match="legacy local target does not match acquired source path"):
+        load_multi(bundle)
 
 
 def test_colliding_local_prey_labels_are_rejected_before_acquisition(

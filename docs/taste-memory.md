@@ -132,7 +132,10 @@ The aggregate `menu.json` uses `hungry-crab.menu/1` with `kind: multi-prey`; `fe
 for deduplication separately from its typed target, which retains the original slug casing or
 canonical local path. Loading checks the source id against that identity and binds the target to its
 verified source menu or digest. Version 1 bundles remain readable; remote slug casing is recovered
-from their source menu. Markdown is paged without dropping cards. Reading and serving rebuild the
+from their source menu. A version 1 local bundle created through the direct API with a relative
+`Path` is not portable across working directories because that format did not record the producer
+CWD; it fails closed if the relative digest root resolves differently. Use an absolute local path
+for a portable bundle. Markdown is paged without dropping cards. Reading and serving rebuild the
 aggregate from its verified source menus.
 
 Generic cards deduplicate by stable nutrient id; prey-specific lessons stay distinct. Every merged

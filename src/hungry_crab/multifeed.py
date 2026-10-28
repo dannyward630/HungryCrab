@@ -262,6 +262,8 @@ def _target_from_v1(value: str, path: Path, menu: dict[str, Any]) -> Target:
     if value != identity or os.path.normcase(prey["label"]) != os.path.normcase(local_path.name):
         raise ValueError("legacy local target does not match source menu")
     source_root = _local_source_root(path)
+    # Version 1 did not record the producer CWD. If this relative digest root now
+    # resolves differently, its source cannot be matched safely; fail closed.
     if os.path.normcase(str(Path(source_root).resolve())) != identity:
         raise ValueError("legacy local target does not match acquired source path")
     return Target(path=local_path)
